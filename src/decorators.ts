@@ -78,22 +78,38 @@ export function CppStruct(): <T extends { new (...args: any[]): {} }>(constructo
 
 /**
  * Декоратор для пометки метода как экспортируемого в C++
+ * Может использоваться как @CppExport() или @CppExport
  */
-export function CppExport() {
-  return function (target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
-    // Получаем типы параметров и возвращаемого значения
-    const paramTypes = Reflect.getMetadata('design:paramtypes', target, propertyKey) || [];
-    const returnType = Reflect.getMetadata('design:returntype', target, propertyKey);
-    
-    const exportInfo: ExportInfo = {
-      name: propertyKey.toString(),
-      paramType: paramTypes.length > 0 ? getTypeString(paramTypes[0]) : 'void',
-      returnType: returnType ? getTypeString(returnType) : 'void'
+export function CppExport(): PropertyDecorator;
+export function CppExport(target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor;
+export function CppExport(...args: any[]): any {
+  if (args.length === 0) {
+    // Вызов с скобками: @CppExport()
+    return function (target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
+      return applyExportDecorator(target, propertyKey, descriptor);
     };
-    
-    Reflect.defineMetadata(EXPORT_METADATA_KEY, exportInfo, target, propertyKey);
-    return descriptor;
+  } else {
+    // Прямой вызов: @CppExport
+    return applyExportDecorator(args[0], args[1], args[2]);
+  }
+}
+
+/**
+ * Применяет логику декоратора экспорта
+ */
+function applyExportDecorator(target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
+  // Получаем типы параметров и возвращаемого значения
+  const paramTypes = Reflect.getMetadata('design:paramtypes', target, propertyKey) || [];
+  const returnType = Reflect.getMetadata('design:returntype', target, propertyKey);
+  
+  const exportInfo: ExportInfo = {
+    name: propertyKey.toString(),
+    paramType: paramTypes.length > 0 ? getTypeString(paramTypes[0]) : 'void',
+    returnType: returnType ? getTypeString(returnType) : 'void'
   };
+  
+  Reflect.defineMetadata(EXPORT_METADATA_KEY, exportInfo, target, propertyKey);
+  return descriptor;
 }
 
 /**
