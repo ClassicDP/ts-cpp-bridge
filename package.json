@@ -1,0 +1,76 @@
+{
+  "name": "ts-cpp-bridge",
+  "version": "1.0.0",
+  "description": "TypeScript-to-C++ bridge generator for Node.js N-API. Automatically generates C++ glue code and type-safe TypeScript wrappers from decorators.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ts-cpp-bridge": "bin/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepare": "npm run build",
+    "test": "npm run build && node tests/test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "typescript",
+    "cpp",
+    "c++",
+    "napi",
+    "node-addon-api",
+    "codegen",
+    "decorators",
+    "bridge",
+    "generator",
+    "type-safe",
+    "glue-code",
+    "bindings",
+    "native",
+    "performance"
+  ],
+  "authors": [
+    {
+      "name": "dp",
+      "email": "dp@example.com"
+    },
+    {
+      "name": "smoki",
+      "email": "smoki@example.com"
+    }
+  ],
+  "author": "dp <dp@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ClassicDP/ts-cpp-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ClassicDP/ts-cpp-bridge/issues"
+  },
+  "homepage": "https://github.com/ClassicDP/ts-cpp-bridge#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ts-morph": "^21.0.1",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "reflect-metadata": "^0.2.0"
+  },
+  "peerDependencies": {
+    "node-addon-api": "^7.1.0"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "templates/",
+    "README.md",
+    "LICENSE",
+    "NAMING.md"
+  ]
+}

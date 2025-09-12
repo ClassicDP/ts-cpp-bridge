@@ -1,0 +1,16 @@
+#include <napi.h>
+#include "generated_structs.hpp"
+
+// External function declarations (implement these in your C++ files)
+{{EXTERN_DECLARATIONS}}
+
+// N-API wrapper functions
+{{WRAPPER_FUNCTIONS}}
+
+// Module initialization
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+{{EXPORT_REGISTRATIONS}}
+    return exports;
+}
+
+NODE_API_MODULE(addon, Init)

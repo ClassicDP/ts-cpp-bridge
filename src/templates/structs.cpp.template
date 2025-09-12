@@ -1,0 +1,3 @@
+#include "generated_structs.hpp"
+
+{{STRUCT_IMPLEMENTATIONS}}

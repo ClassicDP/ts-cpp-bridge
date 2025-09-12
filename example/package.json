@@ -1,0 +1,21 @@
+{
+  "name": "ts-cpp-bridge-example",
+  "version": "1.0.0",
+  "description": "Example usage of ts-cpp-bridge",
+  "main": "dist/test.js",
+  "scripts": {
+    "generate": "ts-cpp-bridge generate -i types.ts",
+    "build": "npm run generate && node-gyp rebuild && tsc",
+    "test": "npm run build && node dist/test.js",
+    "clean": "node -e \"const fs=require('fs'); ['build','dist','generated_*.hpp','generated_*.cpp'].forEach(d => fs.rmSync(d, {recursive:true, force:true}))\""
+  },
+  "dependencies": {
+    "node-addon-api": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-cpp-bridge": "file:..",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0"
+  }
+}

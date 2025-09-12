@@ -1,0 +1,62 @@
+# Source files
+src/
+tsconfig.json
+
+# Examples and tests
+example/
+tests/
+
+# Development files
+.vscode/
+*.log
+*.tgz
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+
+# Documentation files (keep only README.md)
+IMPLEMENTATION_COMPLETE.md
+docs/
+
+# Git files
+.git/
+.gitignore
+
+# Node modules (should not be included anyway)
+node_modules/
+
+# Build artifacts that are not distributed
+coverage/
+*.map
+
+# OS X
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# NPM
+npm-debug.log*
+.npm
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.node
+.DS_Store
+.vscode/
+build/
+example/build/
+example/dist/
+example/generated_*.hpp
+example/generated_*.cpp
