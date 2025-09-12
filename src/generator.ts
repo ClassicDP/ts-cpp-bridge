@@ -1,6 +1,7 @@
 import { Project, ClassDeclaration, MethodDeclaration, PropertyDeclaration, SyntaxKind } from 'ts-morph';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getCppType, getNapiType, getNapiExtractor, isPreciseNumericType } from './numeric-types';
 
 /**
  * Информация о поле структуры, извлеченная из AST
@@ -220,14 +221,19 @@ export class CppGenerator {
    * Маппинг TypeScript типов в C++ типы
    */
   private mapTypeScriptToCpp(tsType: string): string {
-    const typeMap: { [key: string]: string } = {
-      'string': 'std::string',
-      'number': 'int',
-      'boolean': 'bool',
-      'void': 'void'
-    };
-
-    return typeMap[tsType] || tsType; // если неизвестный тип, оставляем как есть
+    // Используем новую систему уточняемых типов
+    const mappedType = getCppType(tsType);
+    
+    // Фолбэк для старых типов, если нет в новой системе
+    if (mappedType === tsType) {
+      const typeMap: { [key: string]: string } = {
+        'number': 'int',  // по умолчанию для совместимости
+        'void': 'void'
+      };
+      return typeMap[tsType] || tsType;
+    }
+    
+    return mappedType;
   }
 
   /**
@@ -362,17 +368,19 @@ export class CppGenerator {
         const sanitizedName = this.sanitizeFieldName(field.name);
         
         if (field.isArray) {
-          implementations += `    Napi::Array arr = Napi::Array::New(env, ${sanitizedName}.size());\n`;
+          // Создаем уникальное имя для каждого массива
+          const arrayVarName = `${sanitizedName}Arr`;
+          implementations += `    Napi::Array ${arrayVarName} = Napi::Array::New(env, ${sanitizedName}.size());\n`;
           implementations += `    for (size_t i = 0; i < ${sanitizedName}.size(); i++) {\n`;
           
           if (field.type === 'std::string') {
-            implementations += `        arr.Set(i, Napi::String::New(env, ${sanitizedName}[i]));\n`;
+            implementations += `        ${arrayVarName}.Set(i, Napi::String::New(env, ${sanitizedName}[i]));\n`;
           } else {
-            implementations += `        arr.Set(i, Napi::Number::New(env, ${sanitizedName}[i]));\n`;
+            implementations += `        ${arrayVarName}.Set(i, Napi::Number::New(env, ${sanitizedName}[i]));\n`;
           }
           
           implementations += `    }\n`;
-          implementations += `    obj.Set("${field.name}", arr);\n`;
+          implementations += `    obj.Set("${field.name}", ${arrayVarName});\n`;
         } else {
           if (field.type === 'std::string') {
             implementations += `    obj.Set("${field.name}", Napi::String::New(env, ${sanitizedName}));\n`;
@@ -449,7 +457,7 @@ export class CppGenerator {
   /**
    * Генерирует файл типов для addon (generated_addon.d.ts)
    */
-  private generateAddonTypes(parseResult: ParseResult, outputDir: string) {
+  public generateAddonTypes(parseResult: ParseResult, outputDir: string) {
     let content = '// Автоматически сгенерированные типы для addon\n\n';
 
     // Генерируем интерфейсы для структур
@@ -487,18 +495,88 @@ export class CppGenerator {
   /**
    * Генерирует TypeScript API обертки (generated_api.ts)
    */
-  private generateTypeScriptAPI(parseResult: ParseResult, outputDir: string) {
+  public generateTypeScriptAPI(parseResult: ParseResult, outputDir: string) {
+    // Собираем уникальные числовые типы для импорта
+    const usedNumericTypes = new Set<string>();
+    
+    for (const struct of parseResult.structs) {
+      for (const field of struct.fields) {
+        const beautifulType = this.cppTypeToTSBeautiful(field.type, parseResult.structs);
+        if (['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(beautifulType)) {
+          usedNumericTypes.add(beautifulType);
+        }
+      }
+    }
+    
     let content = '// Автоматически сгенерированные TypeScript обертки\n\n';
-    content += 'import addon from \'./generated_addon\';\n\n';
+    
+    content += '// Декларация для require\n';
+    content += 'declare const require: any;\n\n';
+    
+    // Добавляем импорт числовых типов, если они используются
+    if (usedNumericTypes.size > 0) {
+      const typesList = Array.from(usedNumericTypes).sort().join(', ');
+      content += `import { ${typesList} } from 'ts-cpp-bridge';\n\n`;
+    }
 
-    // Определяем типы локально в этом файле для простоты
+    // Определяем типы локально в этом файле с красивыми типами
     for (const struct of parseResult.structs) {
       content += `export interface ${struct.name} {\n`;
+      for (const field of struct.fields) {
+        const tsType = this.fieldToTSTypeBeautiful(field, parseResult.structs);
+        content += `  ${field.name}: ${tsType};\n`;
+      }
+      content += '}\n\n';
+    }
+
+    // Объявляем низкоуровневые типы для addon (только number вместо красивых типов)
+    content += '// Низкоуровневые типы для C++ addon\n';
+    for (const struct of parseResult.structs) {
+      content += `interface ${struct.name}Native {\n`;
       for (const field of struct.fields) {
         const tsType = this.fieldToTSType(field, parseResult.structs);
         content += `  ${field.name}: ${tsType};\n`;
       }
       content += '}\n\n';
+    }
+
+    // Объявляем нативный addon
+    content += 'interface AddonExports {\n';
+    for (const exp of parseResult.exports) {
+      const inputType = exp.parameters.length > 0 ? exp.parameters[0].type : 'void';
+      const outputType = exp.returnType;
+      const inputTS = this.cppTypeToTS(inputType, parseResult.structs);
+      const outputTS = this.cppTypeToTS(outputType, parseResult.structs);
+      
+      if (inputType === 'void') {
+        content += `  ${exp.name}: () => ${outputTS}Native;\n`;
+      } else {
+        content += `  ${exp.name}: (input: ${inputTS}Native) => ${outputTS}Native;\n`;
+      }
+    }
+    content += '}\n\n';
+
+    content += '// Импорт нативного addon\n';
+    content += 'const addon: AddonExports = (() => {\n';
+    content += '  try {\n';
+    content += '    return require(\'../../build/Release/addon\');\n';
+    content += '  } catch (e) {\n';
+    content += '    throw new Error(\'Native addon not found. Run npm run build:native first.\');\n';
+    content += '  }\n';
+    content += '})();\n\n';
+
+    // Добавляем функции преобразования типов
+    content += '// Функции преобразования типов\n';
+    for (const struct of parseResult.structs) {
+      // Функция из красивых типов в нативные
+      content += `function to${struct.name}Native(input: ${struct.name}): ${struct.name}Native {\n`;
+      content += `  return input as any; // Типы совместимы на runtime\n`;
+      content += `}\n\n`;
+      
+      // Функция из нативных в красивые типы
+      content += `function from${struct.name}Native(input: ${struct.name}Native): ${struct.name} {\n`;
+      content += `  return input as any; // Типы совместимы на runtime\n`;
+      content += `}\n\n`;
     }
     content += '\n';
 
@@ -523,16 +601,19 @@ export class CppGenerator {
       for (const method of methods) {
         const inputType = method.parameters.length > 0 ? method.parameters[0].type : 'void';
         const outputType = method.returnType;
-        const inputTS = this.cppTypeToTS(inputType, parseResult.structs);
-        const outputTS = this.cppTypeToTS(outputType, parseResult.structs);
+        const inputTS = this.cppTypeToTSBeautiful(inputType, parseResult.structs);
+        const outputTS = this.cppTypeToTSBeautiful(outputType, parseResult.structs);
         
         if (inputType === 'void') {
           content += `  static ${method.methodName}(): ${outputTS} {\n`;
-          content += `    return addon.${method.name}();\n`;
+          content += `    const result = addon.${method.name}();\n`;
+          content += `    return from${outputType}Native(result);\n`;
           content += `  }\n\n`;
         } else {
           content += `  static ${method.methodName}(input: ${inputTS}): ${outputTS} {\n`;
-          content += `    return addon.${method.name}(input);\n`;
+          content += `    const nativeInput = to${inputType}Native(input);\n`;
+          content += `    const result = addon.${method.name}(nativeInput);\n`;
+          content += `    return from${outputType}Native(result);\n`;
           content += `  }\n\n`;
         }
       }
@@ -543,21 +624,41 @@ export class CppGenerator {
     for (const func of freeFunctions) {
       const inputType = func.parameters.length > 0 ? func.parameters[0].type : 'void';
       const outputType = func.returnType;
-      const inputTS = this.cppTypeToTS(inputType, parseResult.structs);
-      const outputTS = this.cppTypeToTS(outputType, parseResult.structs);
+      const inputTS = this.cppTypeToTSBeautiful(inputType, parseResult.structs);
+      const outputTS = this.cppTypeToTSBeautiful(outputType, parseResult.structs);
       
       if (inputType === 'void') {
         content += `export function ${func.name}(): ${outputTS} {\n`;
-        content += `  return addon.${func.name}();\n`;
+        content += `  const result = addonTyped.${func.name}();\n`;
+        content += `  return from${outputType}Native(result);\n`;
         content += `}\n\n`;
       } else {
         content += `export function ${func.name}(input: ${inputTS}): ${outputTS} {\n`;
-        content += `  return addon.${func.name}(input);\n`;
+        content += `  const nativeInput = to${inputType}Native(input);\n`;
+        content += `  const result = addonTyped.${func.name}(nativeInput);\n`;
+        content += `  return from${outputType}Native(result);\n`;
         content += `}\n\n`;
       }
     }
 
     fs.writeFileSync(path.join(outputDir, 'generated_api.ts'), content);
+  }
+
+  /**
+   * Преобразует поле структуры в красивый TypeScript тип (для generated_api.ts)
+   */
+  private fieldToTSTypeBeautiful(field: ParsedField, structs: ParsedStruct[]): string {
+    let baseType = this.cppTypeToTSBeautiful(field.type, structs);
+    
+    if (field.isArray) {
+      baseType += '[]';
+    }
+    
+    if (field.isOptional) {
+      baseType += ' | undefined';
+    }
+    
+    return baseType;
   }
 
   /**
@@ -578,6 +679,49 @@ export class CppGenerator {
   }
 
   /**
+   * Преобразует C++ тип в красивый TypeScript тип (для generated_api.ts)
+   */
+  private cppTypeToTSBeautiful(cppType: string, structs: ParsedStruct[]): string {
+    // Удаляем const и пробелы
+    cppType = cppType.replace(/const\s+/g, '').trim();
+    
+    // Красивые числовые типы
+    const beautifulTypeMap: { [key: string]: string } = {
+      'int': 'number',
+      'double': 'f64',
+      'float': 'f32',
+      'bool': 'boolean',
+      'string': 'string',
+      'std::string': 'string',
+      'void': 'void',
+      // Точные числовые типы
+      'int8_t': 'i8',
+      'uint8_t': 'u8', 
+      'int16_t': 'i16',
+      'uint16_t': 'u16',
+      'int32_t': 'i32',
+      'uint32_t': 'u32',
+      'int64_t': 'i64',
+      'uint64_t': 'u64',
+      'float32_t': 'f32',
+      'float64_t': 'f64'
+    };
+
+    if (beautifulTypeMap[cppType]) {
+      return beautifulTypeMap[cppType];
+    }
+
+    // Проверяем, есть ли такая структура
+    const structExists = structs.some(s => s.name === cppType);
+    if (structExists) {
+      return cppType;
+    }
+
+    // По умолчанию используем обычное преобразование
+    return this.cppTypeToTS(cppType, structs);
+  }
+
+  /**
    * Преобразует C++ тип в TypeScript тип
    */
   private cppTypeToTS(cppType: string, structs: ParsedStruct[]): string {
@@ -592,7 +736,29 @@ export class CppGenerator {
       'bool': 'boolean',
       'string': 'string',
       'std::string': 'string',
-      'void': 'void'
+      'void': 'void',
+      // Точные числовые типы
+      'int8_t': 'number',
+      'uint8_t': 'number', 
+      'int16_t': 'number',
+      'uint16_t': 'number',
+      'int32_t': 'number',
+      'uint32_t': 'number',
+      'int64_t': 'number',
+      'uint64_t': 'number',
+      'float32_t': 'number',
+      'float64_t': 'number',
+      // Алиасы для удобства
+      'i8': 'number',
+      'u8': 'number',
+      'i16': 'number', 
+      'u16': 'number',
+      'i32': 'number',
+      'u32': 'number',
+      'i64': 'number',
+      'u64': 'number',
+      'f32': 'number',
+      'f64': 'number'
     };
 
     if (typeMap[cppType]) {

@@ -17,6 +17,7 @@ program
   .description('Generate C++ glue code from TypeScript decorators')
   .option('-i, --input <files...>', 'Input TypeScript files', ['src/**/*.ts'])
   .option('-o, --output <dir>', 'Output directory for generated C++ files', './src')
+  .option('--ts-output <dir>', 'Output directory for generated TypeScript files')
   .option('-t, --tsconfig <path>', 'Path to tsconfig.json', './tsconfig.json')
   .action((options) => {
     try {
@@ -81,6 +82,19 @@ program
       
       // Генерируем C++ код
       generator.generateCppCode(parseResult, outputDir);
+      
+      // Генерируем TypeScript код, если указана ts-output директория
+      if (options.tsOutput) {
+        const tsOutputDir = path.resolve(options.tsOutput);
+        if (!fs.existsSync(tsOutputDir)) {
+          fs.mkdirSync(tsOutputDir, { recursive: true });
+        }
+        generator.generateTypeScriptAPI(parseResult, tsOutputDir);
+        
+        console.log('✅ TypeScript code generation completed!');
+        console.log(`📁 Generated TS files in: ${tsOutputDir}`);
+        console.log('   - generated_api.ts');
+      }
       
       console.log('✅ C++ code generation completed!');
       console.log(`📁 Generated files in: ${outputDir}`);
