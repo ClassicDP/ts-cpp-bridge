@@ -7,16 +7,16 @@
 
 struct InputData {
     std::string name;
-    int value;
-    std::vector<int> numbers;
+    double value;
+    std::vector<double> numbers;
     static InputData FromNapi(const Napi::Object& obj);
     Napi::Object ToNapi(Napi::Env env) const;
 };
 
 struct OutputData {
     std::string greeting;
-    int doubled;
-    std::vector<int> squared;
+    double doubled;
+    std::vector<double> squared;
     static OutputData FromNapi(const Napi::Object& obj);
     Napi::Object ToNapi(Napi::Env env) const;
 };

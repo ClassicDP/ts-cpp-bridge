@@ -22,10 +22,8 @@ Napi::Value Solver_process_wrapper(const Napi::CallbackInfo& info) {
 
 
 // Module initialization
-Napi::Object Init(Napi::Env env, Napi::Object exports) {
+Napi::Object InitGeneratedAPI(Napi::Env env, Napi::Object exports) {
     exports.Set("Solver_process", Napi::Function::New(env, Solver_process_wrapper));
 
     return exports;
 }
-
-NODE_API_MODULE(addon, Init)

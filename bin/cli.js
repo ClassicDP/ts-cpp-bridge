@@ -89,10 +89,15 @@ program
         if (!fs.existsSync(tsOutputDir)) {
           fs.mkdirSync(tsOutputDir, { recursive: true });
         }
-        generator.generateTypeScriptAPI(parseResult, tsOutputDir);
+        
+        // Генерируем основные файлы
+        generator.generateTypesFile(parseResult, tsOutputDir);
+        generator.generateAddonFile(parseResult, tsOutputDir);
         
         console.log('✅ TypeScript code generation completed!');
         console.log(`📁 Generated TS files in: ${tsOutputDir}`);
+        console.log('   - generated_types.ts');
+        console.log('   - generated_addon.ts');
         console.log('   - generated_api.ts');
       }
       
