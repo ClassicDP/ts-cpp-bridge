@@ -38,6 +38,30 @@ npm install ts-cpp-bridge
 npm install node-addon-api
 ```
 
+## ⚙️ Требования и настройка
+
+### TypeScript конфигурация
+
+Для корректной работы декораторов добавьте в `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "target": "ES2020",
+    "module": "commonjs",
+    "esModuleInterop": true
+  }
+}
+```
+
+### Установка
+
+```bash
+npm install ts-cpp-bridge reflect-metadata
+```
+
 ## 🎯 Быстрый старт
 
 ### 1. Определите типы данных и API
@@ -75,10 +99,11 @@ npx ts-cpp-bridge generate -i types.ts -o src/
 ```
 
 Будет создано:
+
 - `generated_structs.hpp/cpp` - C++ структуры данных
 - `generated_api.cpp` - N-API обертки
 - `generated_addon.d.ts` - типы для addon
-- `generated_api.ts` - **типобезопасные TypeScript обертки**
+- `generated_api.ts` - __типобезопасные TypeScript обертки__
 
 ### 3. Используйте типобезопасный API
 

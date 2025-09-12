@@ -79,14 +79,15 @@ export function CppStruct(): <T extends { new (...args: any[]): {} }>(constructo
 /**
  * Декоратор для пометки метода как экспортируемого в C++
  * Может использоваться как @CppExport() или @CppExport
+ * Поддерживает как legacy, так и современные декораторы TypeScript
  */
-export function CppExport(): PropertyDecorator;
-export function CppExport(target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor;
+export function CppExport(): any;
+export function CppExport(target: any, propertyKey: string | symbol, descriptor?: any): any;
 export function CppExport(...args: any[]): any {
   if (args.length === 0) {
     // Вызов с скобками: @CppExport()
-    return function (target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
-      return applyExportDecorator(target, propertyKey, descriptor);
+    return function (target: any, propertyKey: string | symbol, descriptorOrContext?: any): any {
+      return applyExportDecorator(target, propertyKey, descriptorOrContext);
     };
   } else {
     // Прямой вызов: @CppExport
@@ -97,19 +98,34 @@ export function CppExport(...args: any[]): any {
 /**
  * Применяет логику декоратора экспорта
  */
-function applyExportDecorator(target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
+function applyExportDecorator(target: any, propertyKey: string | symbol, descriptorOrContext?: any): any {
+  // Поддержка как legacy, так и современного API декораторов
+  let actualTarget = target;
+  let actualPropertyKey = propertyKey;
+  
+  // Если это новый API декораторов (TypeScript 5.0+)
+  if (descriptorOrContext && typeof descriptorOrContext === 'object' && 'kind' in descriptorOrContext) {
+    // Новый decorator context API
+    actualTarget = descriptorOrContext.metadata ? descriptorOrContext : target;
+    actualPropertyKey = descriptorOrContext.name || propertyKey;
+  }
+  
   // Получаем типы параметров и возвращаемого значения
-  const paramTypes = Reflect.getMetadata('design:paramtypes', target, propertyKey) || [];
-  const returnType = Reflect.getMetadata('design:returntype', target, propertyKey);
+  const paramTypes = Reflect.getMetadata('design:paramtypes', actualTarget, actualPropertyKey) || [];
+  const returnType = Reflect.getMetadata('design:returntype', actualTarget, actualPropertyKey);
   
   const exportInfo: ExportInfo = {
-    name: propertyKey.toString(),
+    name: actualPropertyKey.toString(),
     paramType: paramTypes.length > 0 ? getTypeString(paramTypes[0]) : 'void',
     returnType: returnType ? getTypeString(returnType) : 'void'
   };
   
-  Reflect.defineMetadata(EXPORT_METADATA_KEY, exportInfo, target, propertyKey);
-  return descriptor;
+  Reflect.defineMetadata(EXPORT_METADATA_KEY, exportInfo, actualTarget, actualPropertyKey);
+  
+  // Возвращаем descriptor если он есть (legacy API), или undefined
+  return descriptorOrContext && typeof descriptorOrContext === 'object' && 'value' in descriptorOrContext 
+    ? descriptorOrContext 
+    : undefined;
 }
 
 /**
