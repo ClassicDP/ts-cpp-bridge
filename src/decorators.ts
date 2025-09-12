@@ -79,7 +79,7 @@ export function CppStruct(): <T extends { new (...args: any[]): {} }>(constructo
 /**
  * Декоратор для пометки метода как экспортируемого в C++
  */
-export function CppExport(): MethodDecorator {
+export function CppExport() {
   return function (target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
     // Получаем типы параметров и возвращаемого значения
     const paramTypes = Reflect.getMetadata('design:paramtypes', target, propertyKey) || [];
