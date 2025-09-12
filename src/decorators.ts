@@ -42,8 +42,8 @@ export interface ExportInfo {
 /**
  * Декоратор для пометки класса как C++ структуры
  */
-export function CppStruct() {
-  return function <T extends { new (...args: any[]): {} }>(constructor: T) {
+export function CppStruct(): <T extends { new (...args: any[]): {} }>(constructor: T) => T {
+  return function <T extends { new (...args: any[]): {} }>(constructor: T): T {
     // Получаем информацию о полях из reflect-metadata
     const fields: FieldInfo[] = [];
     const prototype = constructor.prototype;
@@ -79,14 +79,14 @@ export function CppStruct() {
 /**
  * Декоратор для пометки метода как экспортируемого в C++
  */
-export function CppExport() {
-  return function (target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+export function CppExport(): MethodDecorator {
+  return function (target: any, propertyKey: string | symbol, descriptor: PropertyDescriptor): PropertyDescriptor {
     // Получаем типы параметров и возвращаемого значения
     const paramTypes = Reflect.getMetadata('design:paramtypes', target, propertyKey) || [];
     const returnType = Reflect.getMetadata('design:returntype', target, propertyKey);
     
     const exportInfo: ExportInfo = {
-      name: propertyKey,
+      name: propertyKey.toString(),
       paramType: paramTypes.length > 0 ? getTypeString(paramTypes[0]) : 'void',
       returnType: returnType ? getTypeString(returnType) : 'void'
     };
