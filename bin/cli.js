@@ -105,11 +105,13 @@ program
       console.log(`📁 Generated files in: ${outputDir}`);
       console.log('   - generated_structs.hpp');
       console.log('   - generated_structs.cpp');
-      console.log('   - generated_api.cpp');
+      console.log('   - generated_api.cpp (includes module initialization)');
+      console.log('   - generated_api.h');
+      console.log(`📁 Implementation file: ${path.dirname(outputDir)}/implementation.cpp`);
       console.log('');
       console.log('🔧 Next steps:');
-      console.log('   1. Implement the extern functions in your C++ files');
-      console.log('   2. Add generated files to your binding.gyp');
+      console.log('   1. Implement the required functions in implementation.cpp');
+      console.log('   2. Add all files to your binding.gyp');
       console.log('   3. Run npm run build');
       
     } catch (error) {

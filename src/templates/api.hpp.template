@@ -1,0 +1,9 @@
+#pragma once
+#include <napi.h>
+#include "generated_structs.hpp"
+
+// External function declarations (implement these in addon.cpp)
+{{EXTERN_DECLARATIONS}}
+
+// API wrapper initialization
+Napi::Object InitGeneratedAPI(Napi::Env env, Napi::Object exports);

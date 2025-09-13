@@ -275,6 +275,7 @@ export class CppGenerator {
     this.generateStructsHeader(parseResult.structs, outputDir);
     this.generateStructsImpl(parseResult.structs, outputDir);
     this.generateApiWrapper(parseResult.exports, outputDir);
+    this.generateImplementationTemplate(parseResult.exports, outputDir);
   }
 
   /**
@@ -424,8 +425,15 @@ export class CppGenerator {
    * Генерирует API wrapper
    */
   private generateApiWrapper(exports: ParsedExport[], outputDir: string): void {
-    const template = fs.readFileSync(
+    // Генерируем .cpp файл
+    const cppTemplate = fs.readFileSync(
       path.join(__dirname, 'templates', 'api.cpp.template'), 
+      'utf-8'
+    );
+
+    // Генерируем .h файл
+    const hppTemplate = fs.readFileSync(
+      path.join(__dirname, 'templates', 'api.hpp.template'), 
       'utf-8'
     );
 
@@ -455,12 +463,78 @@ export class CppGenerator {
       exportRegistrations += `    exports.Set("${exp.name}", Napi::Function::New(env, ${exp.name}_wrapper));\n`;
     }
 
-    let output = template
+    // Генерируем .cpp файл
+    let cppOutput = cppTemplate
       .replace('{{EXTERN_DECLARATIONS}}', externDeclarations)
       .replace('{{WRAPPER_FUNCTIONS}}', wrapperFunctions)
       .replace('{{EXPORT_REGISTRATIONS}}', exportRegistrations);
 
-    fs.writeFileSync(path.join(outputDir, 'generated_api.cpp'), output);
+    fs.writeFileSync(path.join(outputDir, 'generated_api.cpp'), cppOutput);
+
+    // Генерируем .h файл
+    let hppOutput = hppTemplate
+      .replace('{{EXTERN_DECLARATIONS}}', externDeclarations);
+
+    fs.writeFileSync(path.join(outputDir, 'generated_api.h'), hppOutput);
+  }
+
+  /**
+   * Генерирует основной файл addon.cpp с инициализацией модуля
+   */
+  private generateMainAddon(exports: ParsedExport[], outputDir: string): void {
+    const template = fs.readFileSync(
+      path.join(__dirname, 'templates', 'addon.cpp.template'), 
+      'utf-8'
+    );
+
+    // Записываем в cpp/src/addon.cpp (на уровень выше generated)
+    const addonPath = path.join(path.dirname(outputDir), 'addon.cpp');
+    
+    // Создаем файл только если его еще нет (чтобы не затирать пользовательский код)
+    if (!fs.existsSync(addonPath)) {
+      fs.writeFileSync(addonPath, template);
+    }
+  }
+
+  /**
+   * Генерирует шаблон файла с реализациями пользователя
+   */
+  private generateImplementationTemplate(exports: ParsedExport[], outputDir: string): void {
+    // Записываем в cpp/src/implementation.cpp (на уровень выше generated)
+    const implPath = path.join(path.dirname(outputDir), 'implementation.cpp');
+    
+    // Проверяем, существует ли файл
+    if (fs.existsSync(implPath)) {
+      console.log(`⚠️  Implementation file already exists: ${implPath}`);
+      console.log('   Skipping generation to preserve your code.');
+      return;
+    }
+
+    const template = fs.readFileSync(
+      path.join(__dirname, 'templates', 'implementation.cpp.template'), 
+      'utf-8'
+    );
+    
+    let externComments = '';
+    let exampleImplementations = '';
+    
+    for (const exp of exports) {
+      externComments += `// ${exp.returnType} ${exp.name}(const ${exp.paramType}& param);\n`;
+      
+      // Создаем пример реализации
+      exampleImplementations += `\n${exp.returnType} ${exp.name}(const ${exp.paramType}& input) {\n`;
+      exampleImplementations += `    ${exp.returnType} result;\n`;
+      exampleImplementations += `    // TODO: Реализуйте логику здесь\n`;
+      exampleImplementations += `    return result;\n`;
+      exampleImplementations += `}\n`;
+    }
+
+    const output = template
+      .replace('{{EXTERN_FUNCTION_COMMENTS}}', externComments)
+      .replace('{{EXAMPLE_IMPLEMENTATIONS}}', exampleImplementations);
+
+    fs.writeFileSync(implPath, output);
+    console.log(`✅ Created implementation template: ${implPath}`);
   }
 
   /**
@@ -481,15 +555,6 @@ export class CppGenerator {
     this.generateAddonFile(parseResult, outputDir);
   }
 
-  /**
-   * Основной метод генерации TypeScript API
-   */
-  /**
-   * Устаревший метод - оставляем для совместимости, но не используем
-   */
-  public generateAddonTypes(parseResult: ParseResult, outputDir: string) {
-    // Этот метод больше не нужен, заменен на generateTypes и generateAddon
-  }
 
   /**
    * Генерирует TypeScript типы (generated_types.ts)
@@ -685,8 +750,8 @@ export class CppGenerator {
     // Удаляем const и пробелы
     cppType = cppType.replace(/const\s+/g, '').trim();
     
-    // Красивые числовые типы
-    const beautifulTypeMap: { [key: string]: string } = {
+    // Красивые числовые типы (семантические типы)
+    const typeMap: { [key: string]: string } = {
       'int': 'number',
       'double': 'f64',
       'float': 'f32',
@@ -694,7 +759,7 @@ export class CppGenerator {
       'string': 'string',
       'std::string': 'string',
       'void': 'void',
-      // Точные числовые типы
+      // Точные числовые типы (семантические)
       'int8_t': 'i8',
       'uint8_t': 'u8', 
       'int16_t': 'i16',
@@ -705,60 +770,6 @@ export class CppGenerator {
       'uint64_t': 'u64',
       'float32_t': 'f32',
       'float64_t': 'f64'
-    };
-
-    if (beautifulTypeMap[cppType]) {
-      return beautifulTypeMap[cppType];
-    }
-
-    // Проверяем, есть ли такая структура
-    const structExists = structs.some(s => s.name === cppType);
-    if (structExists) {
-      return cppType;
-    }
-
-    // По умолчанию используем обычное преобразование
-    return this.cppTypeToTS(cppType, structs);
-  }
-
-  /**
-   * Преобразует C++ тип в TypeScript тип
-   */
-  private cppTypeToTS(cppType: string, structs: ParsedStruct[]): string {
-    // Удаляем const и пробелы
-    cppType = cppType.replace(/const\s+/g, '').trim();
-    
-    // Базовые типы
-    const typeMap: { [key: string]: string } = {
-      'int': 'number',
-      'double': 'number',
-      'float': 'number',
-      'bool': 'boolean',
-      'string': 'string',
-      'std::string': 'string',
-      'void': 'void',
-      // Точные числовые типы
-      'int8_t': 'number',
-      'uint8_t': 'number', 
-      'int16_t': 'number',
-      'uint16_t': 'number',
-      'int32_t': 'number',
-      'uint32_t': 'number',
-      'int64_t': 'number',
-      'uint64_t': 'number',
-      'float32_t': 'number',
-      'float64_t': 'number',
-      // Алиасы для удобства
-      'i8': 'number',
-      'u8': 'number',
-      'i16': 'number', 
-      'u16': 'number',
-      'i32': 'number',
-      'u32': 'number',
-      'i64': 'number',
-      'u64': 'number',
-      'f32': 'number',
-      'f64': 'number'
     };
 
     if (typeMap[cppType]) {
@@ -774,5 +785,13 @@ export class CppGenerator {
     // По умолчанию возвращаем any для неизвестных типов
     console.warn(`Warning: Unknown C++ type '${cppType}', using 'any'`);
     return 'any';
+  }
+
+  /**
+   * Преобразует C++ тип в TypeScript тип (только для внутреннего использования)
+   */
+  private cppTypeToTS(cppType: string, structs: ParsedStruct[]): string {
+    // Используем только семантические типы
+    return this.cppTypeToTSBeautiful(cppType, structs);
   }
 }

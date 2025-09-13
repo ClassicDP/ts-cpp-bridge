@@ -1,0 +1,7 @@
+#include "generated/generated_api.h"
+
+// TODO: Реализуйте эти функции:
+{{EXTERN_FUNCTION_COMMENTS}}
+
+// Пример реализации:
+{{EXAMPLE_IMPLEMENTATIONS}}

@@ -1,0 +1,8 @@
+#include "generated/generated_api.h"
+
+// Инициализация модуля (НЕ ИЗМЕНЯЙТЕ)
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    return InitGeneratedAPI(env, exports);
+}
+
+NODE_API_MODULE(addon, Init)

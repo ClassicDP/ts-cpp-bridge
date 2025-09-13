@@ -12,3 +12,10 @@ Napi::Object InitGeneratedAPI(Napi::Env env, Napi::Object exports) {
 {{EXPORT_REGISTRATIONS}}
     return exports;
 }
+
+// Main module initialization
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+    return InitGeneratedAPI(env, exports);
+}
+
+NODE_API_MODULE(addon, Init)
