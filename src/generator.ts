@@ -574,11 +574,14 @@ export class CppGenerator {
     
     let content = '// Автоматически сгенерированные типы\n\n';
     
-    // Импорт семантических типов, если они используются
-    // Используем импорт из ts-cpp-bridge
+    // Определяем семантические типы локально, если они используются
     if (usedSemanticTypes.size > 0) {
-      const typesList = Array.from(usedSemanticTypes).sort().join(', ');
-      content += `import { ${typesList} } from 'ts-cpp-bridge';\n\n`;
+      content += '// Базовые числовые типы\n';
+      const sortedTypes = Array.from(usedSemanticTypes).sort();
+      for (const type of sortedTypes) {
+        content += `export type ${type} = number;\n`;
+      }
+      content += '\n';
     }
 
     // Генерируем интерфейсы с семантическими типами
@@ -611,10 +614,14 @@ export class CppGenerator {
       semanticTypes.forEach(type => usedSemanticTypes.add(type));
     }
     
-    // Импорт семантических типов, если они используются
+    // Определяем семантические типы локально, если они используются
     if (usedSemanticTypes.size > 0) {
-      const typesList = Array.from(usedSemanticTypes).sort().join(', ');
-      content += `import { ${typesList} } from 'ts-cpp-bridge';\n`;
+      content += '// Базовые числовые типы\n';
+      const sortedTypes = Array.from(usedSemanticTypes).sort();
+      for (const type of sortedTypes) {
+        content += `type ${type} = number;\n`;
+      }
+      content += '\n';
     }
     
     // Импорт сгенерированных типов
@@ -669,10 +676,14 @@ export class CppGenerator {
       semanticTypes.forEach(type => usedSemanticTypes.add(type));
     }
     
-    // Импорт семантических типов, если они используются
+    // Определяем семантические типы локально, если они используются
     if (usedSemanticTypes.size > 0) {
-      const typesList = Array.from(usedSemanticTypes).sort().join(', ');
-      content += `import { ${typesList} } from 'ts-cpp-bridge';\n`;
+      content += '// Базовые числовые типы\n';
+      const sortedTypes = Array.from(usedSemanticTypes).sort();
+      for (const type of sortedTypes) {
+        content += `type ${type} = number;\n`;
+      }
+      content += '\n';
     }
     
     // Импорт сгенерированных типов
