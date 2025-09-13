@@ -21,3 +21,18 @@ struct OutputData {
     Napi::Object ToNapi(Napi::Env env) const;
 };
 
+struct LongTask {
+    double duration;
+    std::string data;
+    static LongTask FromNapi(const Napi::Object& obj);
+    Napi::Object ToNapi(Napi::Env env) const;
+};
+
+struct TaskResult {
+    std::string message;
+    double duration;
+    double timestamp;
+    static TaskResult FromNapi(const Napi::Object& obj);
+    Napi::Object ToNapi(Napi::Env env) const;
+};
+

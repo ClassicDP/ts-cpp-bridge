@@ -1,14 +1,34 @@
-// Временный mock для демонстрации TypeScript API
-// В реальном проекте этот файл будет создан компиляцией C++ addon
+// Загрузчик нативного addon
 
-const mockAddon = {
-  Solver_process: (input: any) => {
-    return {
-      greeting: `Hello, ${input.name}!`,
-      doubled: input.value * 2,
-      squared: input.numbers.map((n: number) => n * n)
-    };
+import { InputData, OutputData, LongTask, TaskResult } from './generated_types';
+
+declare const require: any;
+
+interface AddonExports {
+  Solver_process: (input: InputData) => OutputData;
+  Solver_processLongTask: (input: LongTask) => Promise<TaskResult>;
+  Solver_processHeavyComputation: (input: InputData) => Promise<OutputData>;
+}
+
+let addon: AddonExports;
+
+try {
+  // Пробуем разные пути для поддержки ts-node и обычного node
+  let addonPath;
+  try {
+    addonPath = require.resolve('../../build/Release/addon.node');
+    addon = require(addonPath);
+  } catch (e1) {
+    try {
+      addonPath = require.resolve('../build/Release/addon.node');
+      addon = require(addonPath);
+    } catch (e2) {
+      addonPath = require.resolve('./build/Release/addon.node');
+      addon = require(addonPath);
+    }
   }
-};
+} catch (e) {
+  throw new Error('Native addon not found. Run npm run build first.');
+}
 
-export default mockAddon;
+export default addon;

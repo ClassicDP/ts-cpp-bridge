@@ -1,6 +1,6 @@
 {
   "name": "ts-cpp-bridge",
-  "version": "1.4.4",
+  "version": "1.5.0",
   "description": "TypeScript-to-C++ bridge generator for Node.js N-API. Automatically generates C++ glue code and type-safe TypeScript wrappers from decorators.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

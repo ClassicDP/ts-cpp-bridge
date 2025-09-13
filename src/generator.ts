@@ -32,6 +32,7 @@ export interface ParsedExport {
   paramType: string;
   returnType: string;
   isStatic: boolean;
+  isAsync: boolean;  // Новое поле для асинхронных методов
   parameters: { name: string; type: string }[];
 }
 
@@ -153,7 +154,7 @@ export class CppGenerator {
   }
 
   /**
-   * Парсит методы с декоратором @CppExport
+   * Парсит методы с декоратором @CppExport или @CppAsync
    */
   private parseExports(classDecl: ClassDeclaration): ParsedExport[] {
     const exports: ParsedExport[] = [];
@@ -166,9 +167,13 @@ export class CppGenerator {
         d.getName() === 'CppExport' || 
         d.getFullText().includes('@CppExport')
       );
+      const hasCppAsync = decorators.some(d => 
+        d.getName() === 'CppAsync' || 
+        d.getFullText().includes('@CppAsync')
+      );
 
-      if (hasCppExport) {
-        const exportInfo = this.parseExportMethod(method, className);
+      if (hasCppExport || hasCppAsync) {
+        const exportInfo = this.parseExportMethod(method, className, hasCppAsync);
         if (exportInfo) {
           exports.push(exportInfo);
         }
@@ -181,7 +186,7 @@ export class CppGenerator {
   /**
    * Парсит экспортируемый метод
    */
-  private parseExportMethod(method: MethodDeclaration, className: string): ParsedExport | null {
+  private parseExportMethod(method: MethodDeclaration, className: string, isAsync: boolean = false): ParsedExport | null {
     const methodName = method.getName();
     const parameters = method.getParameters();
     const returnType = method.getReturnTypeNode();
@@ -215,6 +220,7 @@ export class CppGenerator {
       paramType,
       returnType: returnTypeStr,
       isStatic,
+      isAsync,
       parameters: paramList
     };
   }
@@ -445,19 +451,13 @@ export class CppGenerator {
       // Extern объявления
       externDeclarations += `extern ${exp.returnType} ${exp.name}(const ${exp.paramType}& param);\n`;
       
-      // Wrapper функции
-      wrapperFunctions += `\nNapi::Value ${exp.name}_wrapper(const Napi::CallbackInfo& info) {\n`;
-      wrapperFunctions += `    Napi::Env env = info.Env();\n`;
-      wrapperFunctions += `    \n`;
-      wrapperFunctions += `    if (info.Length() < 1 || !info[0].IsObject()) {\n`;
-      wrapperFunctions += `        Napi::TypeError::New(env, "Expected an object").ThrowAsJavaScriptException();\n`;
-      wrapperFunctions += `        return env.Null();\n`;
-      wrapperFunctions += `    }\n`;
-      wrapperFunctions += `    \n`;
-      wrapperFunctions += `    ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
-      wrapperFunctions += `    ${exp.returnType} result = ${exp.name}(input);\n`;
-      wrapperFunctions += `    return result.ToNapi(env);\n`;
-      wrapperFunctions += `}\n`;
+      if (exp.isAsync) {
+        // Генерируем AsyncWorker для асинхронных функций
+        wrapperFunctions += this.generateAsyncWrapper(exp);
+      } else {
+        // Обычные синхронные wrapper функции
+        wrapperFunctions += this.generateSyncWrapper(exp);
+      }
       
       // Регистрация экспортов
       exportRegistrations += `    exports.Set("${exp.name}", Napi::Function::New(env, ${exp.name}_wrapper));\n`;
@@ -476,6 +476,96 @@ export class CppGenerator {
       .replace('{{EXTERN_DECLARATIONS}}', externDeclarations);
 
     fs.writeFileSync(path.join(outputDir, 'generated_api.h'), hppOutput);
+  }
+
+  /**
+   * Генерирует синхронный wrapper для функции
+   */
+  private generateSyncWrapper(exp: ParsedExport): string {
+    let wrapper = `\nNapi::Value ${exp.name}_wrapper(const Napi::CallbackInfo& info) {\n`;
+    wrapper += `    Napi::Env env = info.Env();\n`;
+    wrapper += `    \n`;
+    wrapper += `    if (info.Length() < 1 || !info[0].IsObject()) {\n`;
+    wrapper += `        Napi::TypeError::New(env, "Expected an object").ThrowAsJavaScriptException();\n`;
+    wrapper += `        return env.Null();\n`;
+    wrapper += `    }\n`;
+    wrapper += `    \n`;
+    wrapper += `    ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
+    wrapper += `    ${exp.returnType} result = ${exp.name}(input);\n`;
+    wrapper += `    return result.ToNapi(env);\n`;
+    wrapper += `}\n`;
+    return wrapper;
+  }
+
+  /**
+   * Генерирует асинхронный wrapper для функции с Promise
+   */
+  private generateAsyncWrapper(exp: ParsedExport): string {
+    let wrapper = '';
+    
+    // Генерируем AsyncWorker класс
+    wrapper += `\n// AsyncWorker class for ${exp.name}\n`;
+    wrapper += `class ${exp.name}_AsyncWorker : public Napi::AsyncWorker {\n`;
+    wrapper += `public:\n`;
+    wrapper += `    ${exp.name}_AsyncWorker(Napi::Function& callback, const ${exp.paramType}& input)\n`;
+    wrapper += `        : Napi::AsyncWorker(callback), input_(input) {}\n`;
+    wrapper += `    ~${exp.name}_AsyncWorker() {}\n\n`;
+    
+    wrapper += `    void Execute() override {\n`;
+    wrapper += `        try {\n`;
+    wrapper += `            result_ = ${exp.name}(input_);\n`;
+    wrapper += `        } catch (const std::exception& e) {\n`;
+    wrapper += `            SetError(e.what());\n`;
+    wrapper += `        }\n`;
+    wrapper += `    }\n\n`;
+    
+    wrapper += `    void OnOK() override {\n`;
+    wrapper += `        Napi::HandleScope scope(Env());\n`;
+    wrapper += `        Callback().Call({Env().Null(), result_.ToNapi(Env())});\n`;
+    wrapper += `    }\n\n`;
+    
+    wrapper += `private:\n`;
+    wrapper += `    ${exp.paramType} input_;\n`;
+    wrapper += `    ${exp.returnType} result_;\n`;
+    wrapper += `};\n\n`;
+    
+    // Генерируем wrapper функцию
+    wrapper += `Napi::Value ${exp.name}_wrapper(const Napi::CallbackInfo& info) {\n`;
+    wrapper += `    Napi::Env env = info.Env();\n`;
+    wrapper += `    \n`;
+    wrapper += `    if (info.Length() < 1 || !info[0].IsObject()) {\n`;
+    wrapper += `        Napi::TypeError::New(env, "Expected an object").ThrowAsJavaScriptException();\n`;
+    wrapper += `        return env.Null();\n`;
+    wrapper += `    }\n`;
+    wrapper += `    \n`;
+    wrapper += `    ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
+    wrapper += `    \n`;
+    wrapper += `    // Создаем Promise\n`;
+    wrapper += `    auto deferred = Napi::Promise::Deferred::New(env);\n`;
+    wrapper += `    \n`;
+    wrapper += `    // Создаем callback функцию для Promise\n`;
+    wrapper += `    auto callback = Napi::Function::New(env, [deferred](const Napi::CallbackInfo& info) {\n`;
+    wrapper += `        Napi::Env env = info.Env();\n`;
+    wrapper += `        if (info.Length() > 0 && !info[0].IsNull()) {\n`;
+    wrapper += `            // Ошибка\n`;
+    wrapper += `            deferred.Reject(info[0]);\n`;
+    wrapper += `        } else if (info.Length() > 1) {\n`;
+    wrapper += `            // Успех\n`;
+    wrapper += `            deferred.Resolve(info[1]);\n`;
+    wrapper += `        } else {\n`;
+    wrapper += `            deferred.Reject(Napi::Error::New(env, "Invalid callback arguments").Value());\n`;
+    wrapper += `        }\n`;
+    wrapper += `        return env.Undefined();\n`;
+    wrapper += `    });\n`;
+    wrapper += `    \n`;
+    wrapper += `    // Запускаем AsyncWorker\n`;
+    wrapper += `    ${exp.name}_AsyncWorker* worker = new ${exp.name}_AsyncWorker(callback, input);\n`;
+    wrapper += `    worker->Queue();\n`;
+    wrapper += `    \n`;
+    wrapper += `    return deferred.Promise();\n`;
+    wrapper += `}\n`;
+    
+    return wrapper;
   }
 
   /**
@@ -640,14 +730,31 @@ export class CppGenerator {
     // Определяем интерфейс addon с правильными именами функций
     content += 'interface AddonExports {\n';
     for (const exp of parseResult.exports) {
-      content += `  ${exp.name}: (input: ${exp.paramType}) => ${exp.returnType};\n`;
+      if (exp.isAsync) {
+        content += `  ${exp.name}: (input: ${exp.paramType}) => Promise<${exp.returnType}>;\n`;
+      } else {
+        content += `  ${exp.name}: (input: ${exp.paramType}) => ${exp.returnType};\n`;
+      }
     }
     content += '}\n\n';
 
     // Загрузка addon
     content += 'let addon: AddonExports;\n\n';
     content += 'try {\n';
-    content += '  addon = require(\'../../../build/Release/addon\');\n';
+    content += '  // Пробуем разные пути для поддержки ts-node и обычного node\n';
+    content += '  let addonPath;\n';
+    content += '  try {\n';
+    content += '    addonPath = require.resolve(\'../../build/Release/addon.node\');\n';
+    content += '    addon = require(addonPath);\n';
+    content += '  } catch (e1) {\n';
+    content += '    try {\n';
+    content += '      addonPath = require.resolve(\'../build/Release/addon.node\');\n';
+    content += '      addon = require(addonPath);\n';
+    content += '    } catch (e2) {\n';
+    content += '      addonPath = require.resolve(\'./build/Release/addon.node\');\n';
+    content += '      addon = require(addonPath);\n';
+    content += '    }\n';
+    content += '  }\n';
     content += '} catch (e) {\n';
     content += '  throw new Error(\'Native addon not found. Run npm run build first.\');\n';
     content += '}\n\n';
@@ -709,8 +816,13 @@ export class CppGenerator {
     for (const [className, methods] of classMethods) {
       content += `export class ${className} {\n`;
       for (const method of methods) {
-        content += `  static ${method.methodName}(input: ${method.paramType}): ${method.returnType} {\n`;
-        content += `    return addon.${method.name}(input);\n`;
+        if (method.isAsync) {
+          content += `  static async ${method.methodName}(input: ${method.paramType}): Promise<${method.returnType}> {\n`;
+          content += `    return addon.${method.name}(input);\n`;
+        } else {
+          content += `  static ${method.methodName}(input: ${method.paramType}): ${method.returnType} {\n`;
+          content += `    return addon.${method.name}(input);\n`;
+        }
         content += `  }\n\n`;
       }
       content += '}\n\n';

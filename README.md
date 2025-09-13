@@ -14,6 +14,7 @@ ts-cpp-bridge автоматически генерирует C++ glue код и
 
 - **Автогенерация C++ кода** из TypeScript интерфейсов и декораторов
 - **Типобезопасные TypeScript обертки** для C++ функций
+- **Асинхронные функции с Promise** - выполнение C++ кода в отдельных потоках
 - **Скрытие деталей addon** - чистый TypeScript API для пользователей
 - **Поддержка массивов** и пользовательских структур
 - **Обработка зарезервированных C++ ключевых слов**
@@ -69,7 +70,7 @@ npm install ts-cpp-bridge reflect-metadata
 
 ```typescript
 // types.ts
-import { CppStruct, CppExport } from 'ts-cpp-bridge';
+import { CppStruct, CppExport, CppAsync } from 'ts-cpp-bridge';
 
 @CppStruct()
 export class InputData {
@@ -85,9 +86,27 @@ export class OutputData {
   squared!: number[];
 }
 
+@CppStruct()
+export class LongTask {
+  duration!: number;
+  data!: string;
+}
+
+@CppStruct()
+export class TaskResult {
+  message!: string;
+  duration!: number;
+  timestamp!: number;
+}
+
 export class Solver {
   @CppExport()
   static process(input: InputData): OutputData {
+    throw new Error('Implemented in C++');
+  }
+
+  @CppAsync()
+  static processLongTask(input: LongTask): TaskResult {
     throw new Error('Implemented in C++');
   }
 }
@@ -131,6 +150,27 @@ console.log(result);
 - **Поддержка IDE** - полная поддержка автокомплита и IntelliSense
 - **Простота использования** - от декораторов до готового API за одну команду
 
+## ⚡ Асинхронные функции
+
+ts-cpp-bridge поддерживает асинхронные функции через декоратор `@CppAsync`, который автоматически генерирует Promise-based API:
+
+```typescript
+// Асинхронные вызовы
+const result = await Solver.processLongTask(task);
+
+// Параллельное выполнение  
+const tasks = [task1, task2, task3];
+const results = await Promise.all(
+  tasks.map(task => Solver.processLongTask(task))
+);
+```
+
+**Преимущества:**
+- **Истинная параллельность** - C++ код выполняется в отдельных потоках
+- **Non-blocking** - основной поток Node.js не блокируется  
+- **Promise API** - стандартная работа с async/await
+- **Автогенерация** - AsyncWorker классы создаются автоматически
+
 ## 🔗 Дополнительная документация
 
 - [Мультиплатформенная сборка](CROSS_PLATFORM.md) - подробное руководство по сборке на Linux, macOS и Windows
@@ -147,3 +187,31 @@ MIT License - см. [LICENSE](LICENSE) файл для деталей.
 ---
 
 **ts-cpp-bridge** - ваш мост между TypeScript и C++ с типобезопасностью! 🌉
+
+## ⚡ Асинхронные функции (v1.5.0+)
+
+Начиная с версии 1.5.0, ts-cpp-bridge поддерживает асинхронные функции через декоратор `@CppAsync`:
+
+```typescript
+@CppAsync()
+static processLongTask(input: LongTask): TaskResult {
+  throw new Error('Implemented in C++');
+}
+```
+
+Генерирует TypeScript API с Promise:
+```typescript
+const result = await Solver.processLongTask(task);  // Promise<TaskResult>
+
+// Параллельное выполнение
+const results = await Promise.all([
+  Solver.processLongTask(task1),
+  Solver.processLongTask(task2),  
+  Solver.processLongTask(task3)
+]);
+```
+
+**Особенности:**
+- C++ код выполняется в отдельных потоках (AsyncWorker)
+- Основной поток Node.js не блокируется
+- Полная совместимость с Promise API и async/await

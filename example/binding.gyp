@@ -3,9 +3,9 @@
     {
       "target_name": "addon",
       "sources": [ 
-        "solver.cpp",
-        "generated_structs.cpp",
-        "generated_api.cpp"
+        "implementation.cpp",
+        "src/generated_structs.cpp",
+        "src/generated_api.cpp"
       ],
       "cflags!": [ "-fno-exceptions" ],
       "cflags_cc!": [ "-fno-exceptions" ],

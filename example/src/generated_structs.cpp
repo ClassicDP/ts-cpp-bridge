@@ -55,3 +55,40 @@ Napi::Object OutputData::ToNapi(Napi::Env env) const {
     return obj;
 }
 
+LongTask LongTask::FromNapi(const Napi::Object& obj) {
+    LongTask result;
+    if (obj.Has("duration")) {
+        result.duration = obj.Get("duration").As<Napi::Number>().DoubleValue();
+    }
+    if (obj.Has("data")) {
+        result.data = obj.Get("data").As<Napi::String>().Utf8Value();
+    }
+    return result;
+}
+
+Napi::Object LongTask::ToNapi(Napi::Env env) const {
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("data", Napi::String::New(env, data));
+    return obj;
+}
+
+TaskResult TaskResult::FromNapi(const Napi::Object& obj) {
+    TaskResult result;
+    if (obj.Has("message")) {
+        result.message = obj.Get("message").As<Napi::String>().Utf8Value();
+    }
+    if (obj.Has("duration")) {
+        result.duration = obj.Get("duration").As<Napi::Number>().DoubleValue();
+    }
+    if (obj.Has("timestamp")) {
+        result.timestamp = obj.Get("timestamp").As<Napi::Number>().DoubleValue();
+    }
+    return result;
+}
+
+Napi::Object TaskResult::ToNapi(Napi::Env env) const {
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("message", Napi::String::New(env, message));
+    return obj;
+}
+

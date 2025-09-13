@@ -11,6 +11,7 @@ declare global {
 // Ключи для metadata
 const STRUCT_METADATA_KEY = Symbol('CppStruct');
 const EXPORT_METADATA_KEY = Symbol('CppExport');
+const ASYNC_EXPORT_METADATA_KEY = Symbol('CppAsync');
 const FIELD_METADATA_KEY = Symbol('CppField');
 
 /**
@@ -37,6 +38,7 @@ export interface ExportInfo {
   name: string;
   paramType: string;
   returnType: string;
+  isAsync?: boolean;  // Новое поле для асинхронных методов
 }
 
 /**
@@ -78,54 +80,44 @@ export function CppStruct(): <T extends { new (...args: any[]): {} }>(constructo
 
 /**
  * Декоратор для пометки метода как экспортируемого в C++
- * Может использоваться как @CppExport() или @CppExport
- * Поддерживает как legacy, так и современные декораторы TypeScript
+ * Поддерживает современные декораторы TypeScript
  */
-export function CppExport(): any;
-export function CppExport(target: any, propertyKey: string | symbol, descriptor?: any): any;
-export function CppExport(...args: any[]): any {
-  if (args.length === 0) {
-    // Вызов с скобками: @CppExport()
-    return function (target: any, propertyKey: string | symbol, descriptorOrContext?: any): any {
-      return applyExportDecorator(target, propertyKey, descriptorOrContext);
-    };
-  } else {
-    // Прямой вызов: @CppExport
-    return applyExportDecorator(args[0], args[1], args[2]);
-  }
+export function CppExport<T = any>(): MethodDecorator {
+  return function <T>(target: Object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T> | void {
+    applyExportDecorator(target, propertyKey, descriptor, false);
+    return descriptor;
+  };
+}
+
+/**
+ * Декоратор для пометки метода как асинхронного экспортируемого в C++
+ * Функция будет возвращать Promise и выполняться в отдельном потоке
+ */
+export function CppAsync<T = any>(): MethodDecorator {
+  return function <T>(target: Object, propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T> | void {
+    applyExportDecorator(target, propertyKey, descriptor, true);
+    return descriptor;
+  };
 }
 
 /**
  * Применяет логику декоратора экспорта
  */
-function applyExportDecorator(target: any, propertyKey: string | symbol, descriptorOrContext?: any): any {
-  // Поддержка как legacy, так и современного API декораторов
-  let actualTarget = target;
-  let actualPropertyKey = propertyKey;
-  
-  // Если это новый API декораторов (TypeScript 5.0+)
-  if (descriptorOrContext && typeof descriptorOrContext === 'object' && 'kind' in descriptorOrContext) {
-    // Новый decorator context API
-    actualTarget = descriptorOrContext.metadata ? descriptorOrContext : target;
-    actualPropertyKey = descriptorOrContext.name || propertyKey;
-  }
-  
+function applyExportDecorator(target: any, propertyKey: string | symbol, descriptor: any, isAsync: boolean = false): void {
   // Получаем типы параметров и возвращаемого значения
-  const paramTypes = Reflect.getMetadata('design:paramtypes', actualTarget, actualPropertyKey) || [];
-  const returnType = Reflect.getMetadata('design:returntype', actualTarget, actualPropertyKey);
+  const paramTypes = Reflect.getMetadata('design:paramtypes', target, propertyKey) || [];
+  const returnType = Reflect.getMetadata('design:returntype', target, propertyKey);
   
   const exportInfo: ExportInfo = {
-    name: actualPropertyKey.toString(),
+    name: propertyKey.toString(),
     paramType: paramTypes.length > 0 ? getTypeString(paramTypes[0]) : 'void',
-    returnType: returnType ? getTypeString(returnType) : 'void'
+    returnType: returnType ? getTypeString(returnType) : 'void',
+    isAsync
   };
   
-  Reflect.defineMetadata(EXPORT_METADATA_KEY, exportInfo, actualTarget, actualPropertyKey);
-  
-  // Возвращаем descriptor если он есть (legacy API), или undefined
-  return descriptorOrContext && typeof descriptorOrContext === 'object' && 'value' in descriptorOrContext 
-    ? descriptorOrContext 
-    : undefined;
+  // Для асинхронных функций используем отдельный ключ metadata
+  const metadataKey = isAsync ? ASYNC_EXPORT_METADATA_KEY : EXPORT_METADATA_KEY;
+  Reflect.defineMetadata(metadataKey, exportInfo, target, propertyKey);
 }
 
 /**
@@ -155,6 +147,13 @@ export function getExportInfo(target: any, propertyKey: string): ExportInfo | un
 }
 
 /**
+ * Получить информацию об асинхронном экспорте из метода
+ */
+export function getAsyncExportInfo(target: any, propertyKey: string): ExportInfo | undefined {
+  return Reflect.getMetadata(ASYNC_EXPORT_METADATA_KEY, target, propertyKey);
+}
+
+/**
  * Получить все экспорты из класса
  */
 export function getAllExports(constructor: any): ExportInfo[] {
@@ -166,9 +165,15 @@ export function getAllExports(constructor: any): ExportInfo[] {
   for (const propertyName of propertyNames) {
     if (propertyName === 'constructor') continue;
     
+    // Проверяем как синхронные, так и асинхронные экспорты
     const exportInfo = getExportInfo(prototype, propertyName);
     if (exportInfo) {
       exports.push(exportInfo);
+    }
+    
+    const asyncExportInfo = getAsyncExportInfo(prototype, propertyName);
+    if (asyncExportInfo) {
+      exports.push(asyncExportInfo);
     }
   }
   

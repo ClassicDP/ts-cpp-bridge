@@ -14,6 +14,8 @@
     "emitDecoratorMetadata": true
   },
   "include": [
-    "types.ts"
+    "types.ts",
+    "test-async-generated.ts",
+    "src/**/*.ts"
   ]
 }

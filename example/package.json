@@ -2,12 +2,13 @@
   "name": "ts-cpp-bridge-example",
   "version": "1.0.0",
   "description": "Example usage of ts-cpp-bridge",
-  "main": "dist/test.js",
+  "main": "dist/test-async.js",
   "scripts": {
-    "generate": "ts-cpp-bridge generate -i types.ts",
+    "generate": "ts-cpp-bridge generate -i types.ts -o src --ts-output src",
     "build": "npm run generate && node-gyp rebuild && tsc",
-    "test": "npm run build && node dist/test.js",
-    "clean": "node -e \"const fs=require('fs'); ['build','dist','generated_*.hpp','generated_*.cpp'].forEach(d => fs.rmSync(d, {recursive:true, force:true}))\""
+    "test": "npm run build && node dist/test-async.js",
+    "test:ts": "npx ts-node test-async.ts",
+    "clean": "node -e \"const fs=require('fs'); ['build','dist','src/generated_*'].forEach(d => fs.rmSync(d, {recursive:true, force:true}))\""
   },
   "dependencies": {
     "node-addon-api": "^7.1.0"
