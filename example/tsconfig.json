@@ -15,7 +15,6 @@
   },
   "include": [
     "types.ts",
-    "test-async-generated.ts",
     "src/**/*.ts"
   ]
 }
