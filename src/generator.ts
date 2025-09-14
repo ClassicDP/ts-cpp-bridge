@@ -12,6 +12,7 @@ export interface ParsedField {
   tsType: string;  // Добавляем оригинальный TypeScript тип
   isArray: boolean;
   isOptional: boolean;
+  arrayElementType?: string; // Тип элементов массива
 }
 
 /**
@@ -149,7 +150,8 @@ export class CppGenerator {
       type: this.mapTypeScriptToCpp(baseType),
       tsType: baseType,  // Сохраняем оригинальный TypeScript тип
       isArray,
-      isOptional
+      isOptional,
+      arrayElementType: isArray ? this.mapTypeScriptToCpp(baseType) : undefined
     };
   }
 
@@ -275,6 +277,19 @@ export class CppGenerator {
   }
 
   /**
+   * Проверяет, является ли тип структурой
+   */
+  private isStructType(typeName: string): boolean {
+    // Простая эвристика: если это не базовые типы и не стандартные типы
+    const basicTypes = [
+      'int', 'double', 'float', 'bool', 'std::string', 
+      'uint32_t', 'int32_t', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t', 'int64_t', 'uint64_t',
+      'size_t', 'char', 'unsigned char', 'short', 'unsigned short', 'long', 'unsigned long'
+    ];
+    return !basicTypes.includes(typeName) && !typeName.startsWith('std::vector');
+  }
+
+  /**
    * Генерирует C++ код из результатов парсинга
    */
   public generateCppCode(parseResult: ParseResult, outputDir: string): void {
@@ -331,54 +346,78 @@ export class CppGenerator {
       // FromNapi метод
       implementations += `\n${struct.name} ${struct.name}::FromNapi(const Napi::Object& obj) {\n`;
       implementations += `    ${struct.name} result;\n`;
+      implementations += `    \n`;
+      implementations += `    try {\n`;
       
       for (const field of struct.fields) {
         const sanitizedName = this.sanitizeFieldName(field.name);
         
         if (field.isArray) {
-          implementations += `    if (obj.Has("${field.name}") && obj.Get("${field.name}").IsArray()) {\n`;
-          implementations += `        Napi::Array arr = obj.Get("${field.name}").As<Napi::Array>();\n`;
-          implementations += `        for (uint32_t i = 0; i < arr.Length(); i++) {\n`;
+          implementations += `        if (obj.Has("${field.name}") && obj.Get("${field.name}").IsArray()) {\n`;
+          implementations += `            Napi::Array arr = obj.Get("${field.name}").As<Napi::Array>();\n`;
+          implementations += `            for (uint32_t i = 0; i < arr.Length(); i++) {\n`;
           
-          if (field.type === 'std::string') {
-            implementations += `            result.${sanitizedName}.push_back(arr.Get(i).As<Napi::String>().Utf8Value());\n`;
-          } else if (field.type === 'int') {
-            implementations += `            result.${sanitizedName}.push_back(arr.Get(i).As<Napi::Number>().Int32Value());\n`;
-          } else if (field.type === 'bool') {
-            implementations += `            result.${sanitizedName}.push_back(arr.Get(i).As<Napi::Boolean>().Value());\n`;
+          // Проверяем тип элементов массива
+          const arrayElementType = field.arrayElementType || field.type.replace('std::vector<', '').replace('>', '');
+          
+          if (arrayElementType === 'std::string') {
+            implementations += `                result.${sanitizedName}.push_back(arr.Get(i).As<Napi::String>().Utf8Value());\n`;
+          } else if (this.isStructType(arrayElementType)) {
+            // Массив структур
+            implementations += `                result.${sanitizedName}.push_back(${arrayElementType}::FromNapi(arr.Get(i).As<Napi::Object>()));\n`;
+          } else if (isPreciseNumericType(field.tsType?.replace('[]', '') || '')) {
+            // Массив семантических числовых типов  
+            const cppType = getCppType(field.tsType?.replace('[]', '') || '');
+            implementations += `                result.${sanitizedName}.push_back(static_cast<${cppType}>(arr.Get(i).As<Napi::Number>().Uint32Value()));\n`;
+          } else if (arrayElementType === 'int' || arrayElementType.includes('int')) {
+            implementations += `                result.${sanitizedName}.push_back(arr.Get(i).As<Napi::Number>().Int32Value());\n`;
+          } else if (arrayElementType === 'bool') {
+            implementations += `                result.${sanitizedName}.push_back(arr.Get(i).As<Napi::Boolean>().Value());\n`;
+          } else {
+            // По умолчанию для чисел
+            implementations += `                result.${sanitizedName}.push_back(arr.Get(i).As<Napi::Number>().DoubleValue());\n`;
+          }
+          
+          implementations += `            }\n`;
+          implementations += `        }\n`;
+        } else {
+          implementations += `        if (obj.Has("${field.name}")) {\n`;
+          
+          // Проверяем, является ли это структурой
+          if (this.isStructType(field.type)) {
+            implementations += `            result.${sanitizedName} = ${field.type}::FromNapi(obj.Get("${field.name}").As<Napi::Object>());\n`;
+          } else {
+            // Используем функции из numeric-types для правильной генерации
+            const extractor = getNapiExtractor(field.tsType);
+            if (extractor !== '.As<Napi::Value>()') {
+              // Это известный тип, используем правильный экстрактор
+              if (isPreciseNumericType(field.tsType)) {
+                // Для семантических типов нужно кастовать к правильному C++ типу
+                const cppType = getCppType(field.tsType);
+                implementations += `            result.${sanitizedName} = static_cast<${cppType}>(obj.Get("${field.name}")${extractor});\n`;
+              } else {
+                implementations += `            result.${sanitizedName} = obj.Get("${field.name}")${extractor};\n`;
+              }
+            } else {
+              // Fallback для неизвестных типов
+              if (field.type === 'std::string') {
+                implementations += `            result.${sanitizedName} = obj.Get("${field.name}").As<Napi::String>().Utf8Value();\n`;
+              } else if (field.type === 'int') {
+                implementations += `            result.${sanitizedName} = obj.Get("${field.name}").As<Napi::Number>().Int32Value();\n`;
+              } else if (field.type === 'bool') {
+                implementations += `            result.${sanitizedName} = obj.Get("${field.name}").As<Napi::Boolean>().Value();\n`;
+              }
+            }
           }
           
           implementations += `        }\n`;
-          implementations += `    }\n`;
-        } else {
-          implementations += `    if (obj.Has("${field.name}")) {\n`;
-          
-          // Используем функции из numeric-types для правильной генерации
-          const extractor = getNapiExtractor(field.tsType);
-          if (extractor !== '.As<Napi::Value>()') {
-            // Это известный тип, используем правильный экстрактор
-            if (isPreciseNumericType(field.tsType)) {
-              // Для семантических типов нужно кастовать к правильному C++ типу
-              const cppType = getCppType(field.tsType);
-              implementations += `        result.${sanitizedName} = static_cast<${cppType}>(obj.Get("${field.name}")${extractor});\n`;
-            } else {
-              implementations += `        result.${sanitizedName} = obj.Get("${field.name}")${extractor};\n`;
-            }
-          } else {
-            // Fallback для неизвестных типов
-            if (field.type === 'std::string') {
-              implementations += `        result.${sanitizedName} = obj.Get("${field.name}").As<Napi::String>().Utf8Value();\n`;
-            } else if (field.type === 'int') {
-              implementations += `        result.${sanitizedName} = obj.Get("${field.name}").As<Napi::Number>().Int32Value();\n`;
-            } else if (field.type === 'bool') {
-              implementations += `        result.${sanitizedName} = obj.Get("${field.name}").As<Napi::Boolean>().Value();\n`;
-            }
-          }
-          
-          implementations += `    }\n`;
         }
       }
       
+      implementations += `    } catch (const std::exception& e) {\n`;
+      implementations += `        throw std::runtime_error(std::string("Failed to parse ${struct.name}: ") + e.what());\n`;
+      implementations += `    }\n`;
+      implementations += `    \n`;
       implementations += `    return result;\n`;
       implementations += `}\n`;
 
@@ -395,25 +434,37 @@ export class CppGenerator {
           implementations += `    Napi::Array ${arrayVarName} = Napi::Array::New(env, ${sanitizedName}.size());\n`;
           implementations += `    for (size_t i = 0; i < ${sanitizedName}.size(); i++) {\n`;
           
-          if (field.type === 'std::string') {
+          // Проверяем тип элементов массива
+          const arrayElementType = field.arrayElementType || field.type.replace('std::vector<', '').replace('>', '');
+          
+          if (arrayElementType === 'std::string') {
             implementations += `        ${arrayVarName}.Set(i, Napi::String::New(env, ${sanitizedName}[i]));\n`;
+          } else if (this.isStructType(arrayElementType)) {
+            // Массив структур
+            implementations += `        ${arrayVarName}.Set(i, ${sanitizedName}[i].ToNapi(env));\n`;
           } else {
+            // Числовые типы
             implementations += `        ${arrayVarName}.Set(i, Napi::Number::New(env, ${sanitizedName}[i]));\n`;
           }
           
           implementations += `    }\n`;
           implementations += `    obj.Set("${field.name}", ${arrayVarName});\n`;
         } else {
-          // Используем функции из numeric-types для правильной генерации
-          if (isPreciseNumericType(field.tsType)) {
-            // Для семантических типов нужно кастовать к правильному типу для N-API
-            implementations += `    obj.Set("${field.name}", Napi::Number::New(env, static_cast<double>(${sanitizedName})));\n`;
-          } else if (field.type === 'std::string') {
-            implementations += `    obj.Set("${field.name}", Napi::String::New(env, ${sanitizedName}));\n`;
-          } else if (field.type === 'int') {
-            implementations += `    obj.Set("${field.name}", Napi::Number::New(env, ${sanitizedName}));\n`;
-          } else if (field.type === 'bool') {
-            implementations += `    obj.Set("${field.name}", Napi::Boolean::New(env, ${sanitizedName}));\n`;
+          // Проверяем, является ли это структурой
+          if (this.isStructType(field.type)) {
+            implementations += `    obj.Set("${field.name}", ${sanitizedName}.ToNapi(env));\n`;
+          } else {
+            // Используем функции из numeric-types для правильной генерации
+            if (isPreciseNumericType(field.tsType)) {
+              // Для семантических типов нужно кастовать к правильному типу для N-API
+              implementations += `    obj.Set("${field.name}", Napi::Number::New(env, static_cast<double>(${sanitizedName})));\n`;
+            } else if (field.type === 'std::string') {
+              implementations += `    obj.Set("${field.name}", Napi::String::New(env, ${sanitizedName}));\n`;
+            } else if (field.type === 'int') {
+              implementations += `    obj.Set("${field.name}", Napi::Number::New(env, ${sanitizedName}));\n`;
+            } else if (field.type === 'bool') {
+              implementations += `    obj.Set("${field.name}", Napi::Boolean::New(env, ${sanitizedName}));\n`;
+            }
           }
         }
       }
@@ -521,12 +572,19 @@ export class CppGenerator {
     wrapper += `            result_ = ${exp.name}(input_);\n`;
     wrapper += `        } catch (const std::exception& e) {\n`;
     wrapper += `            SetError(e.what());\n`;
+    wrapper += `        } catch (...) {\n`;
+    wrapper += `            SetError("Unknown error occurred");\n`;
     wrapper += `        }\n`;
     wrapper += `    }\n\n`;
     
     wrapper += `    void OnOK() override {\n`;
     wrapper += `        Napi::HandleScope scope(Env());\n`;
     wrapper += `        Callback().Call({Env().Null(), result_.ToNapi(Env())});\n`;
+    wrapper += `    }\n\n`;
+    
+    wrapper += `    void OnError(const Napi::Error& error) override {\n`;
+    wrapper += `        Napi::HandleScope scope(Env());\n`;
+    wrapper += `        Callback().Call({error.Value(), Env().Undefined()});\n`;
     wrapper += `    }\n\n`;
     
     wrapper += `private:\n`;
@@ -543,7 +601,13 @@ export class CppGenerator {
     wrapper += `        return env.Null();\n`;
     wrapper += `    }\n`;
     wrapper += `    \n`;
-    wrapper += `    ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
+    wrapper += `    ${exp.paramType} input;\n`;
+    wrapper += `    try {\n`;
+    wrapper += `        input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
+    wrapper += `    } catch (const std::exception& e) {\n`;
+    wrapper += `        Napi::TypeError::New(env, std::string("Failed to parse input: ") + e.what()).ThrowAsJavaScriptException();\n`;
+    wrapper += `        return env.Null();\n`;
+    wrapper += `    }\n`;
     wrapper += `    \n`;
     wrapper += `    // Создаем Promise\n`;
     wrapper += `    auto deferred = Napi::Promise::Deferred::New(env);\n`;
