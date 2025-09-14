@@ -19,9 +19,14 @@ Napi::Value Solver_process_wrapper(const Napi::CallbackInfo& info) {
         return env.Null();
     }
     
-    InputData input = InputData::FromNapi(info[0].As<Napi::Object>());
-    OutputData result = Solver_process(input);
-    return result.ToNapi(env);
+    try {
+        InputData input = InputData::FromNapi(info[0].As<Napi::Object>());
+        OutputData result = Solver_process(input);
+        return result.ToNapi(env);
+    } catch (const std::exception& e) {
+        Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();
+        return env.Null();
+    }
 }
 
 // AsyncWorker class for Solver_processLongTask

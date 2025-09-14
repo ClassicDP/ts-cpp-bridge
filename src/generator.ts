@@ -490,9 +490,14 @@ export class CppGenerator {
     wrapper += `        return env.Null();\n`;
     wrapper += `    }\n`;
     wrapper += `    \n`;
-    wrapper += `    ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
-    wrapper += `    ${exp.returnType} result = ${exp.name}(input);\n`;
-    wrapper += `    return result.ToNapi(env);\n`;
+    wrapper += `    try {\n`;
+    wrapper += `        ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
+    wrapper += `        ${exp.returnType} result = ${exp.name}(input);\n`;
+    wrapper += `        return result.ToNapi(env);\n`;
+    wrapper += `    } catch (const std::exception& e) {\n`;
+    wrapper += `        Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();\n`;
+    wrapper += `        return env.Null();\n`;
+    wrapper += `    }\n`;
     wrapper += `}\n`;
     return wrapper;
   }

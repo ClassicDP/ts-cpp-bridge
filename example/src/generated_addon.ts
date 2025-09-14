@@ -16,15 +16,20 @@ try {
   // Пробуем разные пути для поддержки ts-node и обычного node
   let addonPath;
   try {
-    addonPath = require.resolve('../../build/Release/addon.node');
+    addonPath = require.resolve('../../../build/Release/addon.node');
     addon = require(addonPath);
   } catch (e1) {
     try {
-      addonPath = require.resolve('../build/Release/addon.node');
+      addonPath = require.resolve('../../build/Release/addon.node');
       addon = require(addonPath);
     } catch (e2) {
-      addonPath = require.resolve('./build/Release/addon.node');
-      addon = require(addonPath);
+      try {
+        addonPath = require.resolve('../build/Release/addon.node');
+        addon = require(addonPath);
+      } catch (e3) {
+        addonPath = require.resolve('./build/Release/addon.node');
+        addon = require(addonPath);
+      }
     }
   }
 } catch (e) {
