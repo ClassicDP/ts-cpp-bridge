@@ -41,12 +41,19 @@ public:
             result_ = Solver_processLongTask(input_);
         } catch (const std::exception& e) {
             SetError(e.what());
+        } catch (...) {
+            SetError("Unknown error occurred");
         }
     }
 
     void OnOK() override {
         Napi::HandleScope scope(Env());
         Callback().Call({Env().Null(), result_.ToNapi(Env())});
+    }
+
+    void OnError(const Napi::Error& error) override {
+        Napi::HandleScope scope(Env());
+        Callback().Call({error.Value(), Env().Undefined()});
     }
 
 private:
@@ -62,7 +69,13 @@ Napi::Value Solver_processLongTask_wrapper(const Napi::CallbackInfo& info) {
         return env.Null();
     }
     
-    LongTask input = LongTask::FromNapi(info[0].As<Napi::Object>());
+    LongTask input;
+    try {
+        input = LongTask::FromNapi(info[0].As<Napi::Object>());
+    } catch (const std::exception& e) {
+        Napi::TypeError::New(env, std::string("Failed to parse input: ") + e.what()).ThrowAsJavaScriptException();
+        return env.Null();
+    }
     
     // Создаем Promise
     auto deferred = Napi::Promise::Deferred::New(env);
@@ -101,12 +114,19 @@ public:
             result_ = Solver_processHeavyComputation(input_);
         } catch (const std::exception& e) {
             SetError(e.what());
+        } catch (...) {
+            SetError("Unknown error occurred");
         }
     }
 
     void OnOK() override {
         Napi::HandleScope scope(Env());
         Callback().Call({Env().Null(), result_.ToNapi(Env())});
+    }
+
+    void OnError(const Napi::Error& error) override {
+        Napi::HandleScope scope(Env());
+        Callback().Call({error.Value(), Env().Undefined()});
     }
 
 private:
@@ -122,7 +142,13 @@ Napi::Value Solver_processHeavyComputation_wrapper(const Napi::CallbackInfo& inf
         return env.Null();
     }
     
-    InputData input = InputData::FromNapi(info[0].As<Napi::Object>());
+    InputData input;
+    try {
+        input = InputData::FromNapi(info[0].As<Napi::Object>());
+    } catch (const std::exception& e) {
+        Napi::TypeError::New(env, std::string("Failed to parse input: ") + e.what()).ThrowAsJavaScriptException();
+        return env.Null();
+    }
     
     // Создаем Promise
     auto deferred = Napi::Promise::Deferred::New(env);

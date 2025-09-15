@@ -3,5 +3,8 @@
 #include <napi.h>
 #include <string>
 #include <vector>
+#include <cstdint>
+
+{{ENUM_DECLARATIONS}}
 
 {{STRUCT_DECLARATIONS}}

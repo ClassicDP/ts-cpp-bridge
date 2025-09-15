@@ -3,17 +3,24 @@
 
 InputData InputData::FromNapi(const Napi::Object& obj) {
     InputData result;
-    if (obj.Has("name")) {
-        result.name = obj.Get("name").As<Napi::String>().Utf8Value();
-    }
-    if (obj.Has("value")) {
-        result.value = obj.Get("value").As<Napi::Number>().DoubleValue();
-    }
-    if (obj.Has("numbers") && obj.Get("numbers").IsArray()) {
-        Napi::Array arr = obj.Get("numbers").As<Napi::Array>();
-        for (uint32_t i = 0; i < arr.Length(); i++) {
+    
+    try {
+        if (obj.Has("name")) {
+            result.name = obj.Get("name").As<Napi::String>().Utf8Value();
         }
+        if (obj.Has("value")) {
+            result.value = obj.Get("value").As<Napi::Number>().DoubleValue();
+        }
+        if (obj.Has("numbers") && obj.Get("numbers").IsArray()) {
+            Napi::Array arr = obj.Get("numbers").As<Napi::Array>();
+            for (uint32_t i = 0; i < arr.Length(); i++) {
+                result.numbers.push_back(arr.Get(i).As<Napi::Number>().DoubleValue());
+            }
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Failed to parse InputData: ") + e.what());
     }
+    
     return result;
 }
 
@@ -30,17 +37,24 @@ Napi::Object InputData::ToNapi(Napi::Env env) const {
 
 OutputData OutputData::FromNapi(const Napi::Object& obj) {
     OutputData result;
-    if (obj.Has("greeting")) {
-        result.greeting = obj.Get("greeting").As<Napi::String>().Utf8Value();
-    }
-    if (obj.Has("doubled")) {
-        result.doubled = obj.Get("doubled").As<Napi::Number>().DoubleValue();
-    }
-    if (obj.Has("squared") && obj.Get("squared").IsArray()) {
-        Napi::Array arr = obj.Get("squared").As<Napi::Array>();
-        for (uint32_t i = 0; i < arr.Length(); i++) {
+    
+    try {
+        if (obj.Has("greeting")) {
+            result.greeting = obj.Get("greeting").As<Napi::String>().Utf8Value();
         }
+        if (obj.Has("doubled")) {
+            result.doubled = obj.Get("doubled").As<Napi::Number>().DoubleValue();
+        }
+        if (obj.Has("squared") && obj.Get("squared").IsArray()) {
+            Napi::Array arr = obj.Get("squared").As<Napi::Array>();
+            for (uint32_t i = 0; i < arr.Length(); i++) {
+                result.squared.push_back(arr.Get(i).As<Napi::Number>().DoubleValue());
+            }
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Failed to parse OutputData: ") + e.what());
     }
+    
     return result;
 }
 
@@ -57,12 +71,18 @@ Napi::Object OutputData::ToNapi(Napi::Env env) const {
 
 LongTask LongTask::FromNapi(const Napi::Object& obj) {
     LongTask result;
-    if (obj.Has("duration")) {
-        result.duration = obj.Get("duration").As<Napi::Number>().DoubleValue();
+    
+    try {
+        if (obj.Has("duration")) {
+            result.duration = obj.Get("duration").As<Napi::Number>().DoubleValue();
+        }
+        if (obj.Has("data")) {
+            result.data = obj.Get("data").As<Napi::String>().Utf8Value();
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Failed to parse LongTask: ") + e.what());
     }
-    if (obj.Has("data")) {
-        result.data = obj.Get("data").As<Napi::String>().Utf8Value();
-    }
+    
     return result;
 }
 
@@ -74,15 +94,21 @@ Napi::Object LongTask::ToNapi(Napi::Env env) const {
 
 TaskResult TaskResult::FromNapi(const Napi::Object& obj) {
     TaskResult result;
-    if (obj.Has("message")) {
-        result.message = obj.Get("message").As<Napi::String>().Utf8Value();
+    
+    try {
+        if (obj.Has("message")) {
+            result.message = obj.Get("message").As<Napi::String>().Utf8Value();
+        }
+        if (obj.Has("duration")) {
+            result.duration = obj.Get("duration").As<Napi::Number>().DoubleValue();
+        }
+        if (obj.Has("timestamp")) {
+            result.timestamp = obj.Get("timestamp").As<Napi::Number>().DoubleValue();
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("Failed to parse TaskResult: ") + e.what());
     }
-    if (obj.Has("duration")) {
-        result.duration = obj.Get("duration").As<Napi::Number>().DoubleValue();
-    }
-    if (obj.Has("timestamp")) {
-        result.timestamp = obj.Get("timestamp").As<Napi::Number>().DoubleValue();
-    }
+    
     return result;
 }
 

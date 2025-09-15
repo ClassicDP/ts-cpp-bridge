@@ -4,6 +4,14 @@ import * as path from 'path';
 import { getCppType, getNapiType, getNapiExtractor, isPreciseNumericType } from './numeric-types';
 
 /**
+ * Информация об enum'е, извлеченная из AST
+ */
+export interface ParsedEnum {
+  name: string;
+  values: { name: string; value: number }[];
+}
+
+/**
  * Информация о поле структуры, извлеченная из AST
  */
 export interface ParsedField {
@@ -43,6 +51,7 @@ export interface ParsedExport {
 export interface ParseResult {
   structs: ParsedStruct[];
   exports: ParsedExport[];
+  enums: ParsedEnum[];  // Добавляем enum'ы
 }
 
 /**
@@ -64,6 +73,7 @@ export class CppGenerator {
   public parseFiles(filePaths: string[]): ParseResult {
     const structs: ParsedStruct[] = [];
     const exports: ParsedExport[] = [];
+    const enums: ParsedEnum[] = [];
 
     for (const filePath of filePaths) {
       const sourceFile = this.project.addSourceFileAtPath(filePath);
@@ -80,9 +90,18 @@ export class CppGenerator {
         const exportInfos = this.parseExports(classDecl);
         exports.push(...exportInfos);
       }
+
+      // Ищем enum'ы, которые используются в структурах
+      const enumDeclarations = sourceFile.getEnums();
+      for (const enumDecl of enumDeclarations) {
+        const enumInfo = this.parseEnum(enumDecl);
+        if (enumInfo && this.isEnumUsedInStructs(enumInfo.name, structs)) {
+          enums.push(enumInfo);
+        }
+      }
     }
 
-    return { structs, exports };
+    return { structs, exports, enums };
   }
 
   /**
@@ -234,13 +253,13 @@ export class CppGenerator {
     // Используем новую систему уточняемых типов
     const mappedType = getCppType(tsType);
     
-    // Фолбэк для старых типов, если нет в новой системе
+    // Если это не базовый тип, возможно это enum или struct
     if (mappedType === tsType) {
       const typeMap: { [key: string]: string } = {
         'number': 'int',  // по умолчанию для совместимости
         'void': 'void'
       };
-      return typeMap[tsType] || tsType;
+      return typeMap[tsType] || tsType; // Возвращаем as-is для enum'ов и struct'ов
     }
     
     return mappedType;
@@ -277,24 +296,68 @@ export class CppGenerator {
   }
 
   /**
-   * Проверяет, является ли тип структурой
+   * Парсит enum из TypeScript
    */
-  private isStructType(typeName: string): boolean {
-    // Простая эвристика: если это не базовые типы и не стандартные типы
+  private parseEnum(enumDecl: any): ParsedEnum | null {
+    const name = enumDecl.getName();
+    const values: { name: string; value: number }[] = [];
+
+    const members = enumDecl.getMembers();
+    for (const member of members) {
+      const memberName = member.getName();
+      const initializer = member.getInitializer();
+      
+      let value = 0;
+      if (initializer && initializer.getKind() === SyntaxKind.NumericLiteral) {
+        value = parseInt(initializer.getText(), 10);
+      } else {
+        // Если значение не указано, используем автоинкремент
+        value = values.length;
+      }
+
+      values.push({ name: memberName, value });
+    }
+
+    return { name, values };
+  }
+
+  /**
+   * Проверяет, используется ли enum в структурах
+   */
+  private isEnumUsedInStructs(enumName: string, structs: ParsedStruct[]): boolean {
+    for (const struct of structs) {
+      for (const field of struct.fields) {
+        if (field.tsType === enumName) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private isEnumType(typeName: string, enums: ParsedEnum[]): boolean {
+    return enums.some(e => e.name === typeName);
+  }
+
+  /**
+   * Проверяет, является ли тип структурой (не enum и не базовый тип)
+   */
+  private isStructType(typeName: string, enums: ParsedEnum[]): boolean {
+    // Простая эвристика: если это не базовые типы, не enum и не стандартные типы
     const basicTypes = [
       'int', 'double', 'float', 'bool', 'std::string', 
       'uint32_t', 'int32_t', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t', 'int64_t', 'uint64_t',
       'size_t', 'char', 'unsigned char', 'short', 'unsigned short', 'long', 'unsigned long'
     ];
-    return !basicTypes.includes(typeName) && !typeName.startsWith('std::vector');
+    return !basicTypes.includes(typeName) && !this.isEnumType(typeName, enums) && !typeName.startsWith('std::vector');
   }
 
   /**
    * Генерирует C++ код из результатов парсинга
    */
   public generateCppCode(parseResult: ParseResult, outputDir: string): void {
-    this.generateStructsHeader(parseResult.structs, outputDir);
-    this.generateStructsImpl(parseResult.structs, outputDir);
+    this.generateStructsHeader(parseResult.structs, parseResult.enums, outputDir);
+    this.generateStructsImpl(parseResult.structs, parseResult.enums, outputDir);
     this.generateApiWrapper(parseResult.exports, outputDir);
     this.generateImplementationTemplate(parseResult.exports, outputDir);
   }
@@ -302,11 +365,21 @@ export class CppGenerator {
   /**
    * Генерирует заголовочный файл структур
    */
-  private generateStructsHeader(structs: ParsedStruct[], outputDir: string): void {
+  private generateStructsHeader(structs: ParsedStruct[], enums: ParsedEnum[], outputDir: string): void {
     const template = fs.readFileSync(
       path.join(__dirname, 'templates', 'structs.hpp.template'), 
       'utf-8'
     );
+
+    // Генерируем enum'ы
+    let enumDeclarations = '';
+    for (const enumInfo of enums) {
+      enumDeclarations += `\nenum class ${enumInfo.name} : uint32_t {\n`;
+      for (const value of enumInfo.values) {
+        enumDeclarations += `    ${value.name} = ${value.value},\n`;
+      }
+      enumDeclarations += `};\n`;
+    }
 
     let structDeclarations = '';
     
@@ -326,7 +399,9 @@ export class CppGenerator {
       structDeclarations += `};\n`;
     }
 
-    const output = template.replace('{{STRUCT_DECLARATIONS}}', structDeclarations);
+    const output = template
+      .replace('{{ENUM_DECLARATIONS}}', enumDeclarations)
+      .replace('{{STRUCT_DECLARATIONS}}', structDeclarations);
     
     fs.writeFileSync(path.join(outputDir, 'generated_structs.hpp'), output);
   }
@@ -334,7 +409,7 @@ export class CppGenerator {
   /**
    * Генерирует реализацию структур
    */
-  private generateStructsImpl(structs: ParsedStruct[], outputDir: string): void {
+  private generateStructsImpl(structs: ParsedStruct[], enums: ParsedEnum[], outputDir: string): void {
     const template = fs.readFileSync(
       path.join(__dirname, 'templates', 'structs.cpp.template'), 
       'utf-8'
@@ -362,7 +437,7 @@ export class CppGenerator {
           
           if (arrayElementType === 'std::string') {
             implementations += `                result.${sanitizedName}.push_back(arr.Get(i).As<Napi::String>().Utf8Value());\n`;
-          } else if (this.isStructType(arrayElementType)) {
+          } else if (this.isStructType(arrayElementType, enums)) {
             // Массив структур
             implementations += `                result.${sanitizedName}.push_back(${arrayElementType}::FromNapi(arr.Get(i).As<Napi::Object>()));\n`;
           } else if (isPreciseNumericType(field.tsType?.replace('[]', '') || '')) {
@@ -383,9 +458,12 @@ export class CppGenerator {
         } else {
           implementations += `        if (obj.Has("${field.name}")) {\n`;
           
-          // Проверяем, является ли это структурой
-          if (this.isStructType(field.type)) {
+          // Проверяем, является ли это структурой или enum
+          if (this.isStructType(field.type, enums)) {
             implementations += `            result.${sanitizedName} = ${field.type}::FromNapi(obj.Get("${field.name}").As<Napi::Object>());\n`;
+          } else if (this.isEnumType(field.type, enums)) {
+            // Для enum типов конвертируем из числа
+            implementations += `            result.${sanitizedName} = static_cast<${field.type}>(obj.Get("${field.name}").As<Napi::Number>().Int32Value());\n`;
           } else {
             // Используем функции из numeric-types для правильной генерации
             const extractor = getNapiExtractor(field.tsType);
@@ -439,7 +517,7 @@ export class CppGenerator {
           
           if (arrayElementType === 'std::string') {
             implementations += `        ${arrayVarName}.Set(i, Napi::String::New(env, ${sanitizedName}[i]));\n`;
-          } else if (this.isStructType(arrayElementType)) {
+          } else if (this.isStructType(arrayElementType, enums)) {
             // Массив структур
             implementations += `        ${arrayVarName}.Set(i, ${sanitizedName}[i].ToNapi(env));\n`;
           } else {
@@ -450,9 +528,12 @@ export class CppGenerator {
           implementations += `    }\n`;
           implementations += `    obj.Set("${field.name}", ${arrayVarName});\n`;
         } else {
-          // Проверяем, является ли это структурой
-          if (this.isStructType(field.type)) {
+          // Проверяем, является ли это структурой или enum
+          if (this.isStructType(field.type, enums)) {
             implementations += `    obj.Set("${field.name}", ${sanitizedName}.ToNapi(env));\n`;
+          } else if (this.isEnumType(field.type, enums)) {
+            // Для enum типов конвертируем в число
+            implementations += `    obj.Set("${field.name}", Napi::Number::New(env, static_cast<int>(${sanitizedName})));\n`;
           } else {
             // Используем функции из numeric-types для правильной генерации
             if (isPreciseNumericType(field.tsType)) {
@@ -741,6 +822,18 @@ export class CppGenerator {
         content += `export type ${type} = number;\n`;
       }
       content += '\n';
+    }
+
+    // Генерируем enum'ы
+    if (parseResult.enums.length > 0) {
+      content += '// Enum типы\n';
+      for (const enumInfo of parseResult.enums) {
+        content += `export enum ${enumInfo.name} {\n`;
+        for (const value of enumInfo.values) {
+          content += `  ${value.name} = ${value.value},\n`;
+        }
+        content += '}\n\n';
+      }
     }
 
     // Генерируем интерфейсы с семантическими типами
