@@ -19,8 +19,13 @@ export interface ParsedField {
   type: string;
   tsType: string;  // Добавляем оригинальный TypeScript тип
   isArray: boolean;
+  isSet: boolean;
+  isMap: boolean;
   isOptional: boolean;
   arrayElementType?: string; // Тип элементов массива
+  setElementType?: string;   // Тип элементов Set
+  mapKeyType?: string;       // Тип ключа Map
+  mapValueType?: string;     // Тип значения Map
 }
 
 /**
@@ -148,15 +153,28 @@ export class CppGenerator {
 
     const typeText = typeNode.getText();
     const isArray = typeText.includes('[]') || typeText.startsWith('Array<');
+    const isSet = typeText.startsWith('Set<') && typeText.endsWith('>');
+    const isMap = typeText.startsWith('Map<') && typeText.endsWith('>');
     
-    // Извлекаем базовый тип из массива
+    // Извлекаем базовый тип из массива, Set или Map
     let baseType = typeText;
+    let mapKeyType: string | undefined;
+    let mapValueType: string | undefined;
+    
     if (isArray) {
       if (typeText.includes('[]')) {
         baseType = typeText.replace('[]', '');
       } else if (typeText.startsWith('Array<')) {
         baseType = typeText.slice(6, -1); // убираем Array< и >
       }
+    } else if (isSet) {
+      baseType = typeText.slice(4, -1); // убираем Set< и >
+    } else if (isMap) {
+      const innerTypes = typeText.slice(4, -1); // убираем Map< и >
+      const [keyType, valueType] = innerTypes.split(',').map(t => t.trim());
+      mapKeyType = this.mapTypeScriptToCpp(keyType);
+      mapValueType = this.mapTypeScriptToCpp(valueType);
+      baseType = `${keyType},${valueType}`; // Сохраняем для совместимости
     }
 
     // Предупреждение о зарезервированных словах
@@ -167,10 +185,15 @@ export class CppGenerator {
     return {
       name,
       type: this.mapTypeScriptToCpp(baseType),
-      tsType: baseType,  // Сохраняем оригинальный TypeScript тип
+      tsType: typeText,  // Сохраняем оригинальный полный TypeScript тип
       isArray,
+      isSet,
+      isMap,
       isOptional,
-      arrayElementType: isArray ? this.mapTypeScriptToCpp(baseType) : undefined
+      arrayElementType: isArray ? this.mapTypeScriptToCpp(baseType) : undefined,
+      setElementType: isSet ? this.mapTypeScriptToCpp(baseType) : undefined,
+      mapKeyType,
+      mapValueType
     };
   }
 
@@ -409,7 +432,7 @@ export class CppGenerator {
       
       // Поля
       for (const field of struct.fields) {
-        const cppType = field.isArray ? `std::vector<${field.type}>` : field.type;
+        const cppType = getCppType(field.tsType); // Всегда используем getCppType для полного типа
         const sanitizedName = this.sanitizeFieldName(field.name);
         structDeclarations += `    ${cppType} ${sanitizedName};\n`;
       }
@@ -474,6 +497,77 @@ export class CppGenerator {
             implementations += `                result.${sanitizedName}.push_back(arr.Get(i).As<Napi::Number>().DoubleValue());\n`;
           }
           
+          implementations += `            }\n`;
+          implementations += `        }\n`;
+        } else if (field.isSet) {
+          implementations += `        if (obj.Has("${field.name}") && obj.Get("${field.name}").IsArray()) {\n`;
+          implementations += `            Napi::Array arr = obj.Get("${field.name}").As<Napi::Array>();\n`;
+          implementations += `            for (uint32_t i = 0; i < arr.Length(); i++) {\n`;
+          
+          // Проверяем тип элементов Set
+          const setElementType = field.setElementType || field.type.replace('std::unordered_set<', '').replace('>', '');
+          
+          if (setElementType === 'std::string') {
+            implementations += `                result.${sanitizedName}.insert(arr.Get(i).As<Napi::String>().Utf8Value());\n`;
+          } else if (this.isStructType(setElementType, enums)) {
+            // Set структур
+            implementations += `                result.${sanitizedName}.insert(${setElementType}::FromNapi(arr.Get(i).As<Napi::Object>()));\n`;
+          } else if (isPreciseNumericType(field.tsType)) {
+            // Set семантических числовых типов  
+            const cppType = getCppType(field.tsType);
+            implementations += `                result.${sanitizedName}.insert(static_cast<${cppType}>(arr.Get(i).As<Napi::Number>().Uint32Value()));\n`;
+          } else if (setElementType === 'int' || setElementType.includes('int')) {
+            implementations += `                result.${sanitizedName}.insert(arr.Get(i).As<Napi::Number>().Int32Value());\n`;
+          } else if (setElementType === 'bool') {
+            implementations += `                result.${sanitizedName}.insert(arr.Get(i).As<Napi::Boolean>().Value());\n`;
+          } else {
+            // По умолчанию для чисел
+            implementations += `                result.${sanitizedName}.insert(arr.Get(i).As<Napi::Number>().DoubleValue());\n`;
+          }
+          
+          implementations += `            }\n`;
+          implementations += `        }\n`;
+        } else if (field.isMap) {
+          implementations += `        if (obj.Has("${field.name}") && obj.Get("${field.name}").IsObject()) {\n`;
+          implementations += `            Napi::Object mapObj = obj.Get("${field.name}").As<Napi::Object>();\n`;
+          implementations += `            Napi::Array keys = mapObj.GetPropertyNames();\n`;
+          implementations += `            for (uint32_t i = 0; i < keys.Length(); i++) {\n`;
+          implementations += `                Napi::Value key = keys.Get(i);\n`;
+          implementations += `                Napi::Value value = mapObj.Get(key);\n`;
+          
+          // Обработка ключа
+          const keyType = field.mapKeyType || 'std::string';
+          let keyExtraction = '';
+          if (keyType === 'std::string') {
+            keyExtraction = 'key.As<Napi::String>().Utf8Value()';
+          } else if (keyType === 'int' || keyType.includes('int')) {
+            keyExtraction = 'key.As<Napi::Number>().Int32Value()';
+          } else if (isPreciseNumericType(field.tsType?.split(',')[0]?.trim() || '')) {
+            const cppKeyType = getCppType(field.tsType?.split(',')[0]?.trim() || '');
+            keyExtraction = `static_cast<${cppKeyType}>(key.As<Napi::Number>().Uint32Value())`;
+          } else {
+            keyExtraction = 'key.As<Napi::Number>().DoubleValue()';
+          }
+          
+          // Обработка значения
+          const valueType = field.mapValueType || 'double';
+          let valueExtraction = '';
+          if (valueType === 'std::string') {
+            valueExtraction = 'value.As<Napi::String>().Utf8Value()';
+          } else if (this.isStructType(valueType, enums)) {
+            valueExtraction = `${valueType}::FromNapi(value.As<Napi::Object>())`;
+          } else if (valueType === 'int' || valueType.includes('int')) {
+            valueExtraction = 'value.As<Napi::Number>().Int32Value()';
+          } else if (valueType === 'bool') {
+            valueExtraction = 'value.As<Napi::Boolean>().Value()';
+          } else if (isPreciseNumericType(field.tsType?.split(',')[1]?.trim() || '')) {
+            const cppValueType = getCppType(field.tsType?.split(',')[1]?.trim() || '');
+            valueExtraction = `static_cast<${cppValueType}>(value.As<Napi::Number>().Uint32Value())`;
+          } else {
+            valueExtraction = 'value.As<Napi::Number>().DoubleValue()';
+          }
+          
+          implementations += `                result.${sanitizedName}[${keyExtraction}] = ${valueExtraction};\n`;
           implementations += `            }\n`;
           implementations += `        }\n`;
         } else {
@@ -548,6 +642,57 @@ export class CppGenerator {
           
           implementations += `    }\n`;
           implementations += `    obj.Set("${field.name}", ${arrayVarName});\n`;
+        } else if (field.isSet) {
+          // Создаем уникальное имя для каждого Set
+          const setVarName = `${sanitizedName}Arr`;
+          implementations += `    Napi::Array ${setVarName} = Napi::Array::New(env, ${sanitizedName}.size());\n`;
+          implementations += `    size_t ${setVarName}Index = 0;\n`;
+          implementations += `    for (const auto& item : ${sanitizedName}) {\n`;
+          
+          // Проверяем тип элементов Set
+          const setElementType = field.setElementType || field.type.replace('std::unordered_set<', '').replace('>', '');
+          
+          if (setElementType === 'std::string') {
+            implementations += `        ${setVarName}.Set(${setVarName}Index++, Napi::String::New(env, item));\n`;
+          } else if (this.isStructType(setElementType, enums)) {
+            // Set структур
+            implementations += `        ${setVarName}.Set(${setVarName}Index++, item.ToNapi(env));\n`;
+          } else {
+            // Числовые типы
+            implementations += `        ${setVarName}.Set(${setVarName}Index++, Napi::Number::New(env, item));\n`;
+          }
+          
+          implementations += `    }\n`;
+          implementations += `    obj.Set("${field.name}", ${setVarName});\n`;
+        } else if (field.isMap) {
+          // Создаем объект для Map
+          const mapVarName = `${sanitizedName}Obj`;
+          implementations += `    Napi::Object ${mapVarName} = Napi::Object::New(env);\n`;
+          implementations += `    for (const auto& pair : ${sanitizedName}) {\n`;
+          
+          // Обработка ключа
+          const keyType = field.mapKeyType || 'std::string';
+          let keyConversion = '';
+          if (keyType === 'std::string') {
+            keyConversion = 'Napi::String::New(env, pair.first)';
+          } else {
+            keyConversion = 'Napi::Number::New(env, pair.first)';
+          }
+          
+          // Обработка значения
+          const valueType = field.mapValueType || 'double';
+          let valueConversion = '';
+          if (valueType === 'std::string') {
+            valueConversion = 'Napi::String::New(env, pair.second)';
+          } else if (this.isStructType(valueType, enums)) {
+            valueConversion = 'pair.second.ToNapi(env)';
+          } else {
+            valueConversion = 'Napi::Number::New(env, pair.second)';
+          }
+          
+          implementations += `        ${mapVarName}.Set(${keyConversion}, ${valueConversion});\n`;
+          implementations += `    }\n`;
+          implementations += `    obj.Set("${field.name}", ${mapVarName});\n`;
         } else {
           // Проверяем, является ли это структурой или enum
           if (this.isStructType(field.type, enums)) {
@@ -1070,7 +1215,8 @@ export class CppGenerator {
     // Используем оригинальный TS тип напрямую
     let baseType = field.tsType;
     
-    if (field.isArray) {
+    // Не добавляем [] если тип уже содержит []
+    if (field.isArray && !baseType.endsWith('[]')) {
       baseType += '[]';
     }
     

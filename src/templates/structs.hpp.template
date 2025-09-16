@@ -3,6 +3,7 @@
 #include <napi.h>
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include <cstdint>
 
 {{ENUM_DECLARATIONS}}

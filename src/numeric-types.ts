@@ -72,6 +72,36 @@ export const NapiExtractorMapping = {
  * Получить C++ тип по TypeScript типу
  */
 export function getCppType(tsType: string): string {
+  // Обработка Set типов
+  if (tsType.startsWith('Set<') && tsType.endsWith('>')) {
+    const innerType = tsType.slice(4, -1); // Извлекаем внутренний тип
+    const cppInnerType = getCppType(innerType); // Рекурсивно обрабатываем внутренний тип
+    return `std::unordered_set<${cppInnerType}>`;
+  }
+  
+  // Обработка Map типов
+  if (tsType.startsWith('Map<') && tsType.endsWith('>')) {
+    const innerTypes = tsType.slice(4, -1); // Извлекаем внутренние типы
+    const [keyType, valueType] = innerTypes.split(',').map(t => t.trim());
+    const cppKeyType = getCppType(keyType);
+    const cppValueType = getCppType(valueType);
+    return `std::unordered_map<${cppKeyType}, ${cppValueType}>`;
+  }
+  
+  // Обработка Array типов
+  if (tsType.startsWith('Array<') && tsType.endsWith('>')) {
+    const innerType = tsType.slice(6, -1); // Извлекаем внутренний тип
+    const cppInnerType = getCppType(innerType);
+    return `std::vector<${cppInnerType}>`;
+  }
+  
+  // Обработка массивов типа Type[]
+  if (tsType.endsWith('[]')) {
+    const innerType = tsType.slice(0, -2); // Убираем []
+    const cppInnerType = getCppType(innerType);
+    return `std::vector<${cppInnerType}>`;
+  }
+  
   return TypeMapping[tsType as keyof typeof TypeMapping] || tsType;
 }
 
