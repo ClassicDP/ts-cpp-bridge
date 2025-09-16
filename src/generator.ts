@@ -296,6 +296,27 @@ export class CppGenerator {
   }
 
   /**
+   * Преобразует C++ тип в TypeScript тип для генерации
+   */
+  private cppTypeToTSType(cppType: string): string {
+    const typeMap: { [key: string]: string } = {
+      'int8_t': 'i8',
+      'uint8_t': 'u8',
+      'int16_t': 'i16',
+      'uint16_t': 'u16',
+      'int32_t': 'i32',
+      'u32': 'u32',
+      'int64_t': 'i64',
+      'uint64_t': 'u64',
+      'float': 'f32',
+      'double': 'f64',
+      'bool': 'boolean',
+      'std::string': 'string'
+    };
+    return typeMap[cppType] || cppType;
+  }
+
+  /**
    * Парсит enum из TypeScript
    */
   private parseEnum(enumDecl: any): ParsedEnum | null {
@@ -625,7 +646,23 @@ export class CppGenerator {
     wrapper += `    try {\n`;
     wrapper += `        ${exp.paramType} input = ${exp.paramType}::FromNapi(info[0].As<Napi::Object>());\n`;
     wrapper += `        ${exp.returnType} result = ${exp.name}(input);\n`;
-    wrapper += `        return result.ToNapi(env);\n`;
+    
+    // Проверяем, является ли возвращаемый тип примитивным
+    const primitiveTypes = ['int', 'double', 'float', 'bool', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t', 'int32_t', 'uint32_t', 'int64_t', 'uint64_t'];
+    if (primitiveTypes.includes(exp.returnType)) {
+      // Для примитивных типов используем соответствующие Napi конструкторы
+      if (exp.returnType === 'bool') {
+        wrapper += `        return Napi::Boolean::New(env, result);\n`;
+      } else if (exp.returnType === 'int64_t' || exp.returnType === 'uint64_t') {
+        wrapper += `        return Napi::BigInt::New(env, result);\n`;
+      } else {
+        wrapper += `        return Napi::Number::New(env, static_cast<double>(result));\n`;
+      }
+    } else {
+      // Для структур используем ToNapi метод
+      wrapper += `        return result.ToNapi(env);\n`;
+    }
+    
     wrapper += `    } catch (const std::exception& e) {\n`;
     wrapper += `        Napi::Error::New(env, e.what()).ThrowAsJavaScriptException();\n`;
     wrapper += `        return env.Null();\n`;
@@ -660,7 +697,23 @@ export class CppGenerator {
     
     wrapper += `    void OnOK() override {\n`;
     wrapper += `        Napi::HandleScope scope(Env());\n`;
-    wrapper += `        Callback().Call({Env().Null(), result_.ToNapi(Env())});\n`;
+    
+    // Проверяем, является ли возвращаемый тип примитивным
+    const primitiveTypes = ['int', 'double', 'float', 'bool', 'int8_t', 'uint8_t', 'int16_t', 'uint16_t', 'int32_t', 'uint32_t', 'int64_t', 'uint64_t'];
+    if (primitiveTypes.includes(exp.returnType)) {
+      // Для примитивных типов используем соответствующие Napi конструкторы
+      if (exp.returnType === 'bool') {
+        wrapper += `        Callback().Call({Env().Null(), Napi::Boolean::New(Env(), result_)});\n`;
+      } else if (exp.returnType === 'int64_t' || exp.returnType === 'uint64_t') {
+        wrapper += `        Callback().Call({Env().Null(), Napi::BigInt::New(Env(), result_)});\n`;
+      } else {
+        wrapper += `        Callback().Call({Env().Null(), Napi::Number::New(Env(), static_cast<double>(result_))};\n`;
+      }
+    } else {
+      // Для структур используем ToNapi метод
+      wrapper += `        Callback().Call({Env().Null(), result_.ToNapi(Env())});\n`;
+    }
+    
     wrapper += `    }\n\n`;
     
     wrapper += `    void OnError(const Napi::Error& error) override {\n`;
@@ -860,20 +913,23 @@ export class CppGenerator {
     
     for (const exp of parseResult.exports) {
       // Проверяем типы в параметрах и возвращаемом значении
-      const semanticTypes = [exp.paramType, exp.returnType].filter(type => 
-        ['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(type)
-      );
-      semanticTypes.forEach(type => usedSemanticTypes.add(type));
+      const paramTSType = this.cppTypeToTSType(exp.paramType);
+      const returnTSType = this.cppTypeToTSType(exp.returnType);
+      
+      // Если тип был преобразован в семантический, добавляем его
+      if (['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(paramTSType)) {
+        usedSemanticTypes.add(paramTSType);
+      }
+      if (['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(returnTSType)) {
+        usedSemanticTypes.add(returnTSType);
+      }
     }
     
-    // Определяем семантические типы локально, если они используются
+    // Импортируем семантические типы из ts-cpp-bridge, если они используются
     if (usedSemanticTypes.size > 0) {
-      content += '// Базовые числовые типы\n';
+      content += '// Импорт семантических типов\n';
       const sortedTypes = Array.from(usedSemanticTypes).sort();
-      for (const type of sortedTypes) {
-        content += `type ${type} = number;\n`;
-      }
-      content += '\n';
+      content += `import { ${sortedTypes.join(', ')} } from 'ts-cpp-bridge';\n`;
     }
     
     // Импорт сгенерированных типов
@@ -892,10 +948,13 @@ export class CppGenerator {
     // Определяем интерфейс addon с правильными именами функций
     content += 'interface AddonExports {\n';
     for (const exp of parseResult.exports) {
+      const paramType = this.cppTypeToTSType(exp.paramType);
+      const returnType = this.cppTypeToTSType(exp.returnType);
+      
       if (exp.isAsync) {
-        content += `  ${exp.name}: (input: ${exp.paramType}) => Promise<${exp.returnType}>;\n`;
+        content += `  ${exp.name}: (input: ${paramType}) => Promise<${returnType}>;\n`;
       } else {
-        content += `  ${exp.name}: (input: ${exp.paramType}) => ${exp.returnType};\n`;
+        content += `  ${exp.name}: (input: ${paramType}) => ${returnType};\n`;
       }
     }
     content += '}\n\n';
@@ -944,20 +1003,23 @@ export class CppGenerator {
     
     for (const exp of parseResult.exports) {
       // Проверяем типы в параметрах и возвращаемом значении
-      const semanticTypes = [exp.paramType, exp.returnType].filter(type => 
-        ['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(type)
-      );
-      semanticTypes.forEach(type => usedSemanticTypes.add(type));
+      const paramTSType = this.cppTypeToTSType(exp.paramType);
+      const returnTSType = this.cppTypeToTSType(exp.returnType);
+      
+      // Если тип был преобразован в семантический, добавляем его
+      if (['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(paramTSType)) {
+        usedSemanticTypes.add(paramTSType);
+      }
+      if (['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64'].includes(returnTSType)) {
+        usedSemanticTypes.add(returnTSType);
+      }
     }
     
-    // Определяем семантические типы локально, если они используются
+    // Импортируем семантические типы из ts-cpp-bridge, если они используются
     if (usedSemanticTypes.size > 0) {
-      content += '// Базовые числовые типы\n';
+      content += '// Импорт семантических типов\n';
       const sortedTypes = Array.from(usedSemanticTypes).sort();
-      for (const type of sortedTypes) {
-        content += `type ${type} = number;\n`;
-      }
-      content += '\n';
+      content += `import { ${sortedTypes.join(', ')} } from 'ts-cpp-bridge';\n`;
     }
     
     // Импорт сгенерированных типов
@@ -983,11 +1045,14 @@ export class CppGenerator {
     for (const [className, methods] of classMethods) {
       content += `export class ${className} {\n`;
       for (const method of methods) {
+        const paramType = this.cppTypeToTSType(method.paramType);
+        const returnType = this.cppTypeToTSType(method.returnType);
+        
         if (method.isAsync) {
-          content += `  static async ${method.methodName}(input: ${method.paramType}): Promise<${method.returnType}> {\n`;
+          content += `  static async ${method.methodName}(input: ${paramType}): Promise<${returnType}> {\n`;
           content += `    return addon.${method.name}(input);\n`;
         } else {
-          content += `  static ${method.methodName}(input: ${method.paramType}): ${method.returnType} {\n`;
+          content += `  static ${method.methodName}(input: ${paramType}): ${returnType} {\n`;
           content += `    return addon.${method.name}(input);\n`;
         }
         content += `  }\n\n`;
