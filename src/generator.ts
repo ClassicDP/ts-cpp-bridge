@@ -22,6 +22,7 @@ export interface ParsedField {
   isSet: boolean;
   isMap: boolean;
   isOptional: boolean;
+  defaultValue?: string; // Текстовое представление инициализатора, если задан
   arrayElementType?: string; // Тип элементов массива
   setElementType?: string;   // Тип элементов Set
   mapKeyType?: string;       // Тип ключа Map
@@ -182,6 +183,9 @@ export class CppGenerator {
       console.warn(`⚠️  Field '${name}' is a C++ reserved keyword and will be renamed to '${name}_' in generated code`);
     }
 
+    const initializer = prop.getInitializer();
+    const defaultValue = initializer ? initializer.getText() : undefined;
+
     return {
       name,
       type: this.mapTypeScriptToCpp(baseType),
@@ -190,6 +194,7 @@ export class CppGenerator {
       isSet,
       isMap,
       isOptional,
+      defaultValue,
       arrayElementType: isArray ? this.mapTypeScriptToCpp(baseType) : undefined,
       setElementType: isSet ? this.mapTypeScriptToCpp(baseType) : undefined,
       mapKeyType,
@@ -434,7 +439,8 @@ export class CppGenerator {
       for (const field of struct.fields) {
         const cppType = getCppType(field.tsType); // Всегда используем getCppType для полного типа
         const sanitizedName = this.sanitizeFieldName(field.name);
-        structDeclarations += `    ${cppType} ${sanitizedName};\n`;
+        const defaultInit = (field as any).defaultValue ? ` = ${ (field as any).defaultValue }` : '';
+        structDeclarations += `    ${cppType} ${sanitizedName}${defaultInit};\n`;
       }
       
       // Методы
