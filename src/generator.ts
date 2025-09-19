@@ -439,7 +439,16 @@ export class CppGenerator {
       for (const field of struct.fields) {
         const cppType = getCppType(field.tsType); // Всегда используем getCppType для полного типа
         const sanitizedName = this.sanitizeFieldName(field.name);
-        const defaultInit = (field as any).defaultValue ? ` = ${ (field as any).defaultValue }` : '';
+        let defaultInit = '';
+        if ((field as any).defaultValue) {
+          let defaultValue = (field as any).defaultValue;
+          // Для enum типов заменяем . на :: для правильного C++ синтаксиса
+          const isEnumType = enums.some(e => e.name === cppType);
+          if (isEnumType) {
+            defaultValue = defaultValue.replace('.', '::');
+          }
+          defaultInit = ` = ${defaultValue}`;
+        }
         structDeclarations += `    ${cppType} ${sanitizedName}${defaultInit};\n`;
       }
       
