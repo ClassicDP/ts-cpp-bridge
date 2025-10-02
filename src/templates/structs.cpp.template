@@ -1,3 +1,4 @@
 #include "generated_structs.hpp"
+#include <stdexcept>
 
 {{STRUCT_IMPLEMENTATIONS}}
